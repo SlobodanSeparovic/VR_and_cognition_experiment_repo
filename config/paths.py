@@ -1,4 +1,13 @@
+from pathlib import Path
 import os
+
+def get_project_root(marker="settings.ini"):
+    """Find project root by searching for a marker file."""
+    path = Path(__file__).resolve()
+    for parent in [path] + list(path.parents):
+        if (parent / marker).exists():
+            return parent
+    raise FileNotFoundError(f"Could not find project root with marker '{marker}'.")
 
 def get_paths(input_file):
     """
@@ -12,7 +21,7 @@ def get_paths(input_file):
     session = [p for p in parts if p.startswith('ses-')][0]
 
     # Define base directories
-    base_dir = r'D:\master_thesis\VR_and_cognition_experiment_repo'
+    base_dir = get_project_root()
     base_data_dir = os.path.join(base_dir, 'data')
     base_report_dir = os.path.join(base_dir, 'report')
 

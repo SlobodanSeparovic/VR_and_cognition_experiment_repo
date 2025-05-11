@@ -1,16 +1,42 @@
 import numpy as np
 import pandas as pd
 
-def calculate_kinematics(df):
+def calculate_kinematics(stream, start_time, end_time, buffer):
+    """
+    Calculate kinematics with a buffer period.
+    
+    Parameters:
+        buffer (float): Seconds before task start to include for velocity calculations.
+    """
+    # Stream to df
+    motion_cols = [
+        'HmdPosX', 'HmdPosY', 'HmdPosZ', 'HmdRotX', 'HmdRotY', 'HmdRotZ', 'HmdRotW',
+        'LeftPosX', 'LeftPosY', 'LeftPosZ', 'LeftRotX', 'LeftRotY', 'LeftRotZ', 'LeftRotW',
+        'RightPosX', 'RightPosY', 'RightPosZ', 'RightRotX', 'RightRotY', 'RightRotZ', 'RightRotW',
+        'LeftTrigger', 'RightTrigger'
+    ]
+    df = pd.DataFrame(stream["time_series"], columns=motion_cols)
+    df['Timestamp'] = stream["time_stamps"]
+    
+    # Crop with buffer before task start
+    df_cropped = df[
+        (df['Timestamp'] >= start_time - buffer) & 
+        (df['Timestamp'] <= end_time)
+    ].copy()
+
+    # Calculate velocities (first row will have NaN from buffer pre-task)
     devices = ['Hmd', 'Left', 'Right']
     for device in devices:
-        df = _calc_linear_velocity(df, device)
-        df = _calc_angular_velocity(df, device)
-    # Drop position and rotation columns
-    df = df.drop(columns=[c for c in df.columns if 'Pos' in c or 'Rot' in c])
-    # Drop the first row (index 0) due to NaNs from differencing
-    df = df.iloc[1:].reset_index(drop=True)
-    return df
+        df_cropped = _calc_linear_velocity(df_cropped, device)
+        df_cropped = _calc_angular_velocity(df_cropped, device)
+
+    # Remove raw position/rotation columns
+    df_cropped = df_cropped.drop(columns=[c for c in df_cropped.columns if 'Pos' in c or 'Rot' in c])
+
+    # Remove initial NaN (even if buffer = 0, this reflects less than 0.01 s of motion data loss)
+    df_cropped = df_cropped.iloc[1:].reset_index(drop=True)
+
+    return df_cropped
 
 def _calc_linear_velocity(df, device):
     """Calculate 3D linear velocity in m/s from positional data."""

@@ -36,23 +36,23 @@ def create_raw(stream):
     return mne.io.RawArray(eeg_data, info)
 
 def basic_processing(raw, paths):
-    # --- Filtering ---
+    # Filtering
     raw.filter(1, 40, fir_design='firwin')
     raw.notch_filter(50)
     
-    # --- Bad channel detection and interpolation ---
+    # Bad channel detection and interpolation
     bads, bad_details = detect_bad_channels(raw)
     raw.info['bads'] = bads
     raw.interpolate_bads()
 
-    # --- Save PSD plot as PNG ---
+    # Save PSD plot as PNG
     psd = raw.compute_psd(fmax=40)
     fig_psd = psd.plot(show=False)
     psd_path = os.path.join(paths['figures'], 'psd_before_cleaning.png')
     fig_psd.savefig(psd_path, bbox_inches='tight')
     plt.close(fig_psd)
 
-    # --- Save RANSAC report ---
+    # Save RANSAC report
     log_content = (
         "Bad Channel Report (RANSAC)\n"
         "---------------------------\n"

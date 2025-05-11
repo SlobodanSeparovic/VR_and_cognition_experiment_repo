@@ -10,6 +10,13 @@ VR_and_cognition_experiment/
 │   └── analyze_eeg.py
 ├── config/
 │   └── paths.py
-└── main.py
+├── main.py
+├── README.md
+├── requirements.txt
+└── settings.ini
 
+# Automatically extracts root repository directory
 
+# Add buffer time window for correction of eeg based on movement data
+
+# Add .xdf file path to settings.ini
