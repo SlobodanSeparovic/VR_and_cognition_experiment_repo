@@ -46,7 +46,7 @@ root.title("NASA TLX Questionnaire")
 root.geometry("600x700")
 
 # Set the window to open in full screen
-root.attributes('-fullscreen', True)
+# root.attributes('-fullscreen', True)
 
 # Adjust the responses to work with a 0-100 scale with increments of 5
 responses = [tk.IntVar(value=50) for _ in questions]  # Default to midpoint (50)
@@ -57,8 +57,8 @@ def create_radio_buttons(question, index):
     
     # Display the channel name in bold and the question text centered with spacing before the response optionsgit push
     label_lines = question.strip().split('\n', 1)
-    tk.Label(frame, text=label_lines[0], font=("Arial", 13, "bold")).pack()
-    tk.Label(frame, text=label_lines[1], font=("Arial", 12), wraplength=700, justify="center").pack()
+    tk.Label(frame, text=label_lines[0], font=("Arial", 28, "bold")).pack()
+    tk.Label(frame, text=label_lines[1], font=("Arial", 27), wraplength=700, justify="center").pack()
     # tk.Label(frame, text="").pack()
 
     
@@ -67,23 +67,23 @@ def create_radio_buttons(question, index):
 
     # Add left label on the far left
     left_label = performance_labels[0] if index == 3 else labels[0]
-    tk.Label(button_frame, text=left_label, font=("Arial", 12)).pack(side="left", padx=20)
+    tk.Label(button_frame, text=left_label, font=("Arial", 27)).pack(side="left", padx=20)
 
     # Add the radio buttons in the middle with values 0, 5, 10, ..., 100
     for i in range(21):
         value = i * 5  # This gives values from 0 to 100 in increments of 5
         label = "I"
-        font_size = 8
+        font_size = 23
         
         if value == 50:  # Middle value
-            font_size = 14  # Larger font for the middle value
+            font_size = 29  # Larger font for the middle value
         
         rb = tk.Radiobutton(button_frame, variable=responses[index], value=value, indicatoron=False, width=3, text=label, font=("Arial", font_size))
         rb.pack(side="left", padx=2)
 
     # Add right label on the far right
     right_label = performance_labels[-1] if index == 3 else labels[-1]
-    tk.Label(button_frame, text=right_label, font=("Arial", 12)).pack(side="right", padx=20)
+    tk.Label(button_frame, text=right_label, font=("Arial", 27)).pack(side="right", padx=20)
 
 # Generate UI
 for i, question in enumerate(questions):
@@ -98,10 +98,10 @@ def submit_responses():
     for widget in root.winfo_children():
         widget.pack_forget()
     
-    tk.Label(root, text="Thank you for completing the questionnaire!\nPress escape button to exit.", font=("Arial", 14)).pack(pady=20)
+    tk.Label(root, text="Thank you for completing the questionnaire!\nPress escape button to exit.", font=("Arial", 29)).pack(pady=20)
 
 # Submit button
-tk.Button(root, text="Submit", font=("Arial", 14), command=submit_responses).pack(pady=20)
+tk.Button(root, text="Submit", font=("Arial", 29), command=submit_responses).pack(pady=20)
 
 # Function to close the window (bound to the Escape key)
 def close_window(event):
