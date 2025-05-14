@@ -2,15 +2,16 @@ import mne
 
 def calculate_indices(raw):
     """Calculate indices directly from Raw object"""
-    theta, alpha, beta = calculate_band_power(raw)
+    frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta = _calculate_band_power(raw)
     return {
-        'cognitive_load': theta / alpha,
-        'engagement': beta / (theta + alpha)
+        'cognitive_load': frontal_theta / parietal_alpha,
+        'engagement': global_beta / (global_theta + global_alpha)
     }
 
-def calculate_band_power(raw):
-    """Calculate frontal theta (4-8Hz), parietal alpha (8-13Hz), and global beta (13-30Hz) power.
-    Raises ValueError if required channels are missing."""
+def _calculate_band_power(raw):
+    """Calculate frontal theta (4-7Hz), parietal alpha (8-12Hz), and global beta (13-30Hz) power.
+    Raises ValueError if required channels are missing.
+    Calculate band power while excluding annotated artifact periods."""
     
     # Define target channels
     frontal_channels = ['AF3', 'AF4', 'F3', 'Fz', 'F4']
@@ -33,14 +34,22 @@ def calculate_band_power(raw):
             "Participant data cannot be used for the experiment."
         )
 
-    # Calculate power spectra
-    psd_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=4, fmax=8, method='welch', n_fft=2048)
-    psd_alpha = raw.copy().pick(parietal_chs).compute_psd(fmin=8, fmax=13, method='welch', n_fft=2048)
-    psd_beta = raw.copy().pick(available_channels).compute_psd(fmin=13, fmax=30, method='welch', n_fft=2048)
+    n_fft = 512  # FFT length (samples)
+    n_per_seg = 512  # Segment length (samples)
+    n_overlap = int(0.75 * n_per_seg)  # 75% overlap
+    
+    # Calculate power spectra while rejecting the motion artifact periods
+    psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=4, fmax=8, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
+    psd_parietal_alpha = raw.copy().pick(parietal_chs).compute_psd(fmin=8, fmax=13, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
+    psd_global_theta = raw.copy().pick(available_channels).compute_psd(fmin=4, fmax=8, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
+    psd_global_alpha = raw.copy().pick(available_channels).compute_psd(fmin=8, fmax=13, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
+    psd_global_beta = raw.copy().pick(available_channels).compute_psd(fmin=13, fmax=31, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
 
     # Calculate mean absolute power
-    theta = psd_theta.get_data().mean(axis=0).mean()
-    alpha = psd_alpha.get_data().mean(axis=0).mean()
-    beta = psd_beta.get_data().mean(axis=0).mean()
+    frontal_theta = psd_frontal_theta.get_data().mean(axis=0).mean()
+    parietal_alpha = psd_parietal_alpha.get_data().mean(axis=0).mean()
+    global_theta = psd_global_theta.get_data().mean(axis=0).mean()
+    global_alpha = psd_global_alpha.get_data().mean(axis=0).mean()
+    global_beta = psd_global_beta.get_data().mean(axis=0).mean()
 
-    return theta, alpha, beta
+    return frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta

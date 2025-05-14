@@ -9,8 +9,8 @@ from mne_icalabel import label_components
 from mne import make_fixed_length_events
 
 def process_eeg(stream, paths, start_time, end_time):
-    raw = create_raw(stream)
-    raw_processed = basic_processing(raw, paths)
+    raw = _create_raw(stream)
+    raw_processed = _basic_processing(raw, paths)
     
     # Convert absolute times to relative
     eeg_start_time = stream["time_stamps"][0]
@@ -18,7 +18,7 @@ def process_eeg(stream, paths, start_time, end_time):
     tmax = min(raw.times[-1], end_time - eeg_start_time)  # Don't exceed EEG duration
     
     raw_processed.crop(tmin=tmin, tmax=tmax)
-    raw_clean = ica_cleaning(raw_processed, paths)
+    raw_clean = _ica_cleaning(raw_processed, paths)
     
     # Save using context manager
     with mne.io.RawArray(raw_clean.get_data(), raw_clean.info) as temp_raw:
@@ -26,7 +26,43 @@ def process_eeg(stream, paths, start_time, end_time):
     
     return raw_clean
 
-def create_raw(stream):
+def flag_eeg_artifacts_from_motion(raw, motion_df):
+    """
+    Annotate EEG with motion artifacts based on pre-buffered motion_df.
+    Each contiguous block of MotionArtifact==True is marked as one annotation.
+    """
+    # Find contiguous artifact blocks
+    artifact_mask = motion_df['MotionArtifact'].values
+    timestamps = motion_df['Timestamp'].values
+    sfreq = 1 / np.mean(np.diff(timestamps))  # Calculate sampling rate
+
+    onsets = []
+    durations = []
+
+    in_artifact = False
+    for i in range(len(artifact_mask)):
+        if artifact_mask[i] and not in_artifact:
+            # Start of new artifact block
+            start_time = timestamps[i]
+            in_artifact = True
+        elif not artifact_mask[i] and in_artifact:
+            # End of artifact block
+            end_time = timestamps[i-1]
+            onsets.append(start_time)
+            durations.append(end_time - start_time + (1/sfreq))  # Add frame duration
+            in_artifact = False
+    # Handle case where last sample is in artifact
+    if in_artifact:
+        end_time = timestamps[-1]
+        onsets.append(start_time)
+        durations.append(end_time - start_time + (1/sfreq))
+
+    # Create and add annotations
+    annotations = mne.Annotations(onset=onsets, duration=durations, description='bad_motion_artifact')
+    raw.set_annotations(annotations + raw.annotations)
+    return raw
+
+def _create_raw(stream):
     eeg_data = np.array(stream["time_series"]).T / 1e6  # μV→V
     sfreq = float(stream["info"]["nominal_srate"][0])
     ch_names = "AF3,AF4,F3,Fz,F4,P3,Pz,P4".split(',')[:eeg_data.shape[0]]
@@ -37,13 +73,13 @@ def create_raw(stream):
     
     return mne.io.RawArray(eeg_data, info)
 
-def basic_processing(raw, paths):
+def _basic_processing(raw, paths):
     # Filtering
     raw.filter(1, 40, fir_design='firwin')
     raw.notch_filter(50)
     
     # Bad channel detection and interpolation
-    bads, bad_details = detect_bad_channels(raw)
+    bads, bad_details = _detect_bad_channels(raw)
     raw.info['bads'] = bads
     raw.drop_channels(raw.info['bads'])
 
@@ -69,7 +105,7 @@ def basic_processing(raw, paths):
     return raw
 
 
-def ica_cleaning(raw, paths):
+def _ica_cleaning(raw, paths):
     """Perform hybrid automated/manual ICA artifact rejection."""
     # Ensure figures directory exists
     os.makedirs(paths['figures'], exist_ok=True)
@@ -164,7 +200,7 @@ def ica_cleaning(raw, paths):
         plt.show(block=True)
 
         # 3. Get user input after closing figure
-        ica.exclude = get_valid_exclusion_input(ica.n_components_)
+        ica.exclude = _get_valid_exclusion_input(ica.n_components_)
         plt.close('all')
 
     # ====================
@@ -248,47 +284,7 @@ def ica_cleaning(raw, paths):
     return ica.apply(raw)
 
 
-def safe_topo_plot(ica, temp_path, exclude=None):
-    """Safe topography plotting with excluded components marked."""
-    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-    
-    try:
-        # Plot all components
-        topo_fig = ica.plot_components(show=False)
-        
-        # Mark excluded components with red X
-        if exclude:
-            fig = topo_fig[0] if isinstance(topo_fig, list) else topo_fig
-            for idx in exclude:
-                if idx < len(fig.axes):
-                    ax = fig.axes[idx]
-                    ax.text(0.5, 0.5, 'X', color='red', fontsize=48,
-                            ha='center', va='center', transform=ax.transAxes,
-                            weight='bold')
-
-        # Save and close
-        if isinstance(topo_fig, list):
-            topo_fig[0].savefig(temp_path, bbox_inches='tight')
-            [plt.close(f) for f in topo_fig]
-        else:
-            topo_fig.savefig(temp_path, bbox_inches='tight')
-            plt.close(topo_fig)
-            
-    except Exception as e:
-        raise RuntimeError(f"Failed to create topography plot: {str(e)}")
-
-def generate_iclabel_text(raw, ica):
-    """Generate ICLabel classification text with error handling."""
-    try:
-        ic_labels = label_components(raw, ica, method="iclabel")
-        return "\n".join(
-            f"Component {c}: {ic_labels['labels'][c]} ({ic_labels['y_pred_proba'][c]:.1%})"
-            for c in range(ica.n_components_)
-        )
-    except Exception as e:
-        return f"ICLabel Error: {str(e)}"
-
-def get_valid_exclusion_input(n_components):
+def _get_valid_exclusion_input(n_components):
     """Validate component exclusion input with enhanced checks."""
     while True:
         exclude = input("Enter components to exclude (comma-separated): ").strip()
@@ -304,7 +300,7 @@ def get_valid_exclusion_input(n_components):
             print("Invalid format. Use numbers like '0,2,3'")
 
 
-def detect_bad_channels(raw):
+def _detect_bad_channels(raw):
     """Bad channel detection optimized for Enobio 8 dry electrodes"""
     # Ensure montage is set
     if not raw.info['dig']:
@@ -325,7 +321,7 @@ def detect_bad_channels(raw):
     
     # 2. Calculate PTP values
     try:
-        ptp_values = calculate_ptp_percentile(raw, percentile=95)
+        ptp_values = _calculate_ptp_percentile(raw, percentile=95)
     except ValueError as e:
         raise RuntimeError(f"PTP calculation failed: {str(e)}")
 
@@ -372,7 +368,7 @@ def detect_bad_channels(raw):
     
     return all_bads, details
 
-def calculate_ptp_percentile(raw, percentile=95):
+def _calculate_ptp_percentile(raw, percentile=95):
     """Calculate specified percentile of PTP in sliding windows"""
     # Create events with duration validation
     duration = 1.0

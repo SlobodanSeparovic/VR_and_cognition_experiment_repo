@@ -42,7 +42,7 @@ def main(input_file):
         streams['motion'],
         task_start,
         task_end,
-        float(config['PREPROCESSING']['buffer'])
+        buffer=0.2
     )
     
     # Process EEG data (cropped to exact task period)
@@ -52,6 +52,9 @@ def main(input_file):
         task_start,
         task_end
     )
+    
+    # Add motion artifact annotations to EEG
+    raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)
     
     # Analyze EEG and get cognitive indices
     indices = analyze_eeg.calculate_indices(raw_clean)

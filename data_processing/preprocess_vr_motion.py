@@ -2,12 +2,7 @@ import numpy as np
 import pandas as pd
 
 def calculate_kinematics(stream, start_time, end_time, buffer):
-    """
-    Calculate kinematics with a buffer period.
-    
-    Parameters:
-        buffer (float): Seconds before task start to include for velocity calculations.
-    """
+    """ Calculate kinematics. """
     # Stream to df
     motion_cols = [
         'HmdPosX', 'HmdPosY', 'HmdPosZ', 'HmdRotX', 'HmdRotY', 'HmdRotZ', 'HmdRotW',
@@ -18,9 +13,9 @@ def calculate_kinematics(stream, start_time, end_time, buffer):
     df = pd.DataFrame(stream["time_series"], columns=motion_cols)
     df['Timestamp'] = stream["time_stamps"]
     
-    # Crop with buffer before task start
+    # Crop to task duration
     df_cropped = df[
-        (df['Timestamp'] >= start_time - buffer) & 
+        (df['Timestamp'] >= start_time) & 
         (df['Timestamp'] <= end_time)
     ].copy()
 
@@ -29,11 +24,15 @@ def calculate_kinematics(stream, start_time, end_time, buffer):
     for device in devices:
         df_cropped = _calc_linear_velocity(df_cropped, device)
         df_cropped = _calc_angular_velocity(df_cropped, device)
+        
+    # Calculate thresholds and flag artifacts
+    thresholds = _calculate_thresholds(df_cropped)
+    df_cropped = _flag_artifacts(df_cropped, thresholds, buffer)
 
     # Remove raw position/rotation columns
     df_cropped = df_cropped.drop(columns=[c for c in df_cropped.columns if 'Pos' in c or 'Rot' in c])
 
-    # Remove initial NaN (even if buffer = 0, this reflects less than 0.01 s of motion data loss)
+    # Remove initial NaN (this reflects less than 0.01 s of motion data loss)
     df_cropped = df_cropped.iloc[1:].reset_index(drop=True)
 
     return df_cropped
@@ -81,7 +80,48 @@ def _calc_angular_velocity(df, device):
     time_deltas = time_deltas.fillna(avg_delta).replace(0, avg_delta)
     
     # Calculate angular velocity
-    angular_velocity = np.concatenate([[np.nan], angles]) / time_deltas
+    angular_velocity = np.full_like(time_deltas, np.nan)
+    angular_velocity[1:] = angles / time_deltas[1:]  # Explicit index alignment
     
     df[f'{device}AngularVelocity'] = angular_velocity
+    return df
+
+def _calculate_thresholds(df, percentile=95):
+    thresholds = {}
+    devices = ['Hmd', 'Left', 'Right']
+    for device in devices:
+        lin_vel = df[f'{device}Velocity'].dropna()
+        ang_vel = df[f'{device}AngularVelocity'].dropna()
+        thresholds[f'{device}_lin'] = np.percentile(lin_vel, percentile)
+        thresholds[f'{device}_ang'] = np.percentile(ang_vel, percentile)
+    return thresholds
+
+def _flag_artifacts(df, thresholds, buffer):
+    """Flag artifacts with 200ms buffers, incuding inital buffer handled separately as task was initiated with a trigger"""
+    df = df.copy()
+    df['MotionArtifact'] = False
+    
+    # Initial buffer (handled separately as no buffer needs to be added to it later)
+    start_time = df['Timestamp'].min()
+    initial_end = start_time + buffer
+    initial_mask = (df['Timestamp'] >= start_time) & (df['Timestamp'] <= initial_end)
+    
+    # Motion/trigger artifacts (exclude initial buffer from this logic)
+    other_artifacts = False
+    for device in ['Hmd', 'Left', 'Right']:
+        lin_mask = df[f'{device}Velocity'] > thresholds[f'{device}_lin']
+        ang_mask = df[f'{device}AngularVelocity'] > thresholds[f'{device}_ang']
+        other_artifacts |= lin_mask | ang_mask
+    
+    for side in ['Left', 'Right']:
+        other_artifacts |= df[f'{side}Trigger'] == 1.0
+    
+    # Apply buffer only to non-initial artifacts
+    artifact_times = df[other_artifacts]['Timestamp']
+    buffered_other_artifacts = False
+    for t in artifact_times:
+        buffered_other_artifacts |= (df['Timestamp'] >= t - buffer) & (df['Timestamp'] <= t + buffer)
+    
+    # Combine masks (initial buffer + other buffered artifacts)
+    df['MotionArtifact'] = initial_mask | buffered_other_artifacts
     return df
