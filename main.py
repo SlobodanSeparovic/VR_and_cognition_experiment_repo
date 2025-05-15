@@ -16,6 +16,7 @@ config_path = os.path.join(os.path.dirname(__file__), "settings.ini")
 config.read(config_path)
 
 
+
 def main(input_file):      
     # Get paths
     paths = get_paths(input_file)
@@ -37,7 +38,7 @@ def main(input_file):
     )
     
         
-    # Process VR motion data during task, read buffer fom config and pass it
+    # Process VR motion data during task
     motion_df = preprocess_vr_motion.calculate_kinematics(
         streams['motion'],
         task_start,
@@ -57,12 +58,12 @@ def main(input_file):
     raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)
     
     # Analyze EEG and get cognitive indices
-    indices = analyze_eeg.calculate_indices(raw_clean)
+    eeg_indexes = analyze_eeg.calculate_indices(raw_clean)
     
     # Print results with aligned metrics
     print(f"\nTask Duration: {task_end - task_start:.2f}s")
-    print(f"Cognitive Load Index: {indices['cognitive_load']:.2f}")
-    print(f"Engagement Index: {indices['engagement']:.2f}")
+    print(f"Cognitive Load Index: {eeg_indexes['cognitive_load']:.2f}")
+    print(f"Engagement Index: {eeg_indexes['engagement']:.2f}")
     print(f"F1 Score: {processed_game_df['F1Score'].iloc[0]:.2f}")
     
     return {
