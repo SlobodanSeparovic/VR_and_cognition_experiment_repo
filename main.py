@@ -16,11 +16,7 @@ config_path = os.path.join(os.path.dirname(__file__), "settings.ini")
 config.read(config_path)
 
 
-
-def main(input_file):      
-    # Get paths
-    paths = get_paths(input_file)
-    
+def main(input_file):       
     # Read and align all data streams
     streams = read_xdf.load_xdf(input_file)
     
@@ -30,12 +26,16 @@ def main(input_file):
     # Process clean_game_df to get relevant metrics
     processed_game_df = preprocess_behavioral.process_in_game_df(clean_game_df)
     
+    print(processed_game_df)
+    
     # Process NASA-TLX with context from cleaned game data
     processed_nasatlx_df = preprocess_behavioral.process_nasatlx(
         streams['nasatlx'],
         processed_game_df['Environment'].iloc[0],
         processed_game_df['N'].iloc[0]
     )
+    
+    print(processed_nasatlx_df)
     
         
     # Process VR motion data during task
@@ -46,15 +46,18 @@ def main(input_file):
         buffer=0.2
     )
     
+    print(motion_df)
+    
     # Process EEG data (cropped to exact task period)
     raw_clean = preprocess_eeg.process_eeg(
         streams['eeg'],
-        paths,
+        input_file,
         task_start,
         task_end
     )
     
     # Add motion artifact annotations to EEG
+    
     raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)
     
     # Analyze EEG and get cognitive indices
@@ -76,3 +79,4 @@ def main(input_file):
 if __name__ == "__main__":
     # Run main with path to input file from congfig file
     main(config['INPUT']['input_file'])
+    

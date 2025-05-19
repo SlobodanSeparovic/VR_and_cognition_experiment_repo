@@ -9,47 +9,52 @@ def get_project_root(marker="settings.ini"):
             return parent
     raise FileNotFoundError(f"Could not find project root with marker '{marker}'.")
 
-def get_paths(input_file):
-    """
-    Generate standardized paths for data and report storage based on input file.
-    Returns a dict with all relevant paths for figures and text logs.
-    """
-    # Extract subject and session from filename
+def get_paths(input_file, base_output_dir=None):
+    """Generate paths without session numbers in the directory structure."""
+    # Extract subject and task (ignore session)
     base_name = os.path.basename(input_file)
     parts = base_name.split('_')
-    subject = [p for p in parts if p.startswith('sub-')][0]
-    session = [p for p in parts if p.startswith('ses-')][0]
+    
+    # Get subject (sub-P002 → P002)
+    subject = [p.split('-')[1] for p in parts if p.startswith('sub-')][0]
+    
+    # Get task (task-urban_3 → urban_3)
+    task = [p.split('-')[1] for p in parts if p.startswith('task-')][0]
 
-    # Define base directories
-    base_dir = get_project_root()
-    base_data_dir = os.path.join(base_dir, 'data')
-    base_report_dir = os.path.join(base_dir, 'report')
+    # Set base directory (auto-create /data if not specified)
+    if not base_output_dir:
+        base_output_dir = get_project_root() / 'data'
 
-    # Construct all needed directories
-    processed_dir = os.path.join(base_data_dir, subject, session, 'eeg')
-    reports_dir = os.path.join(base_report_dir, subject, session, 'eeg')
-    figures_dir = os.path.join(base_report_dir, subject, session, 'figures')
-
-    # Ensure directories exist
-    for d in [processed_dir, reports_dir, figures_dir]:
-        os.makedirs(d, exist_ok=True)
-
-    # Example file names for data and logs (no HTML)
-    raw_edf = os.path.join(processed_dir, base_name.replace('.xdf', '.edf'))
-    cleaned_fif = os.path.join(processed_dir, base_name.replace('.xdf', '_cleaned.fif'))
-    processing_log = os.path.join(reports_dir, 'processing_log.txt')
-    ica_rejection_log = os.path.join(reports_dir, 'ica_rejection.txt')
-
-    return {
-        'subject': subject,
-        'session': session,
-        'base_data_dir': base_data_dir,
-        'base_report_dir': base_report_dir,
-        'processed': processed_dir,
-        'reports': reports_dir,
-        'figures': figures_dir,
-        'raw_edf': raw_edf,
-        'cleaned_fif': cleaned_fif,
-        'processing_log': processing_log,
-        'ica_rejection_log': ica_rejection_log,
+    # Define directory structure WITHOUT sessions
+    path_template = {
+        'root': Path(base_output_dir) / f'subject-{subject}' / task,
+        'raw': '00_raw',
+        'filtered': '01_filtered',
+        'bad_channels': '02_bad_channels',
+        'ica': '03_ica_cleaned',
+        'figures': 'reports/figures',
+        'logs': 'reports/logs'
     }
+
+    # Create directories and paths
+    paths = {}
+    for key, rel_path in path_template.items():
+        full_path = rel_path if key == 'root' else path_template['root'] / rel_path
+        full_path.mkdir(parents=True, exist_ok=True)
+        paths[key] = str(full_path)
+
+    # Add file-specific paths
+    base_stem = base_name.replace('.xdf', '')
+    paths.update({
+        'subject': subject,
+        'task': task,
+        'raw_fif': Path(paths['raw']) / f'{base_stem}_raw.fif',
+        'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered.fif',
+        'bad_channels_fif': Path(paths['bad_channels']) / f'{base_stem}_badchansremoved.fif',
+        'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned.fif',
+        'processing_log': Path(paths['logs']) / f'{base_stem}_processing_log.txt',
+        'ica_report': Path(paths['figures']) / f'{base_stem}_ica_report.png',
+        'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt' 
+    })
+
+    return paths

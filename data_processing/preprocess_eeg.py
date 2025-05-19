@@ -7,22 +7,39 @@ import os
 from pyprep.find_noisy_channels import NoisyChannels
 from mne_icalabel import label_components
 from mne import make_fixed_length_events
+from config.paths import get_paths
 
-def process_eeg(stream, paths, start_time, end_time):
+def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=None):
+    """Process EEG data with intermediate saves at each step."""
+    # Get all paths from config-enabled module
+    paths = get_paths(input_filename, base_output_dir)
+     
+    # Create raw data
     raw = _create_raw(stream)
-    raw_processed = _basic_processing(raw, paths)
     
     # Convert absolute times to relative
     eeg_start_time = stream["time_stamps"][0]
     tmin = max(0, start_time - eeg_start_time)  # Ensure non-negative
     tmax = min(raw.times[-1], end_time - eeg_start_time)  # Don't exceed EEG duration
     
-    raw_processed.crop(tmin=tmin, tmax=tmax)
-    raw_clean = _ica_cleaning(raw_processed, paths)
+    # Crop raw and save eeg    
+    raw.crop(tmin=tmin, tmax=tmax)
+    raw.save(paths['raw_fif'], overwrite=True)
     
-    # Save using context manager
-    with mne.io.RawArray(raw_clean.get_data(), raw_clean.info) as temp_raw:
-        temp_raw.save(os.path.join(paths['processed'], 'cleaned_eeg.fif'), overwrite=True)
+    # Basic processing (filtering) and save
+    raw_filtered = _basic_filtering(raw, paths)
+    raw_filtered.save(paths['filtered_fif'], overwrite=True)
+    
+    # Bad channel detection and deletion and save
+    bads = _detect_bad_channels(raw_filtered, paths)
+    raw_filtered.info['bads'] = bads
+    raw_bads_dropped = raw_filtered.drop_channels(raw.info['bads'])
+    raw_bads_dropped.save(paths['bad_channels_fif'], overwrite=True)
+    
+    # ICA and save
+    raw_clean = _ica_cleaning(raw_bads_dropped, paths)
+    raw_clean.save(paths['ica_fif'], overwrite=True)
+    
     
     return raw_clean
 
@@ -73,16 +90,11 @@ def _create_raw(stream):
     
     return mne.io.RawArray(eeg_data, info)
 
-def _basic_processing(raw, paths):
+def _basic_filtering(raw, paths):
     # Filtering
     raw.filter(1, 40, fir_design='firwin')
     raw.notch_filter(50)
     
-    # Bad channel detection and interpolation
-    bads, bad_details = _detect_bad_channels(raw)
-    raw.info['bads'] = bads
-    raw.drop_channels(raw.info['bads'])
-
     # Save PSD plot as PNG
     psd = raw.compute_psd(fmax=40)
     fig_psd = psd.plot(show=False)
@@ -90,20 +102,86 @@ def _basic_processing(raw, paths):
     fig_psd.savefig(psd_path, bbox_inches='tight')
     plt.close(fig_psd)
 
+    return raw
+
+def _detect_bad_channels(raw, paths):
+    """Bad channel detection optimized for Enobio 8 dry electrodes"""
+    # Ensure montage is set
+    if not raw.info['dig']:
+        raw.set_montage('standard_1020', match_case=False, on_missing='warn')
+    
+    # Initialize detector
+    noisy_detector = NoisyChannels(
+        raw,
+        random_state=42,
+        matlab_strict=False
+    )
+    
+    # 1. Peak-to-Peak thresholds
+    ptp_thresholds = {
+        'min_peak': 50e-6,   
+        'max_peak': 5000e-6   # 2500 µV
+    }
+    
+    # 2. Calculate PTP values
+    try:
+        ptp_values = _calculate_ptp_percentile(raw, percentile=95)
+    except ValueError as e:
+        raise RuntimeError(f"PTP calculation failed: {str(e)}")
+
+    # 3. Identify bad channels using ptp_values
+    bad_by_ptp = [
+        raw.ch_names[i] 
+        for i, ptp in enumerate(ptp_values)
+        if (ptp < ptp_thresholds['min_peak']) or (ptp > ptp_thresholds['max_peak'])
+    ]
+    
+    # 4. Adjusted correlation detection
+    noisy_detector.find_bad_by_correlation(
+        correlation_secs=2,        # 2s windows
+        correlation_threshold=0.25, # 0.25 correlation cutoff
+        frac_bad=0.25              # 25% bad windows allowed
+    )
+    
+    # 5. Adjusted deviation detection
+    noisy_detector.find_bad_by_deviation(
+        deviation_threshold= 3.0    # 3.0 SD from median
+    )
+    
+    # Combine all bad channels
+    all_bads = list(set(
+        bad_by_ptp +
+        noisy_detector.bad_by_correlation +
+        noisy_detector.bad_by_deviation
+    ))
+    
+    # Final validation
+    if len(all_bads) == len(raw.ch_names):
+        raise ValueError("All channels flagged as bad! Check preprocessing.")
+    if len(all_bads) > len(raw.ch_names) // 2:
+        print("Over 50% channels flagged - manual inspection recommended")
+    
+    # Prepare detailed results
+    details = {
+        "bad_by_ptp": bad_by_ptp,
+        "bad_by_correlation": noisy_detector.bad_by_correlation,
+        "bad_by_deviation": noisy_detector.bad_by_deviation,
+        "ptp_values": {ch: f"{ptp:.2e} V" for ch, ptp in zip(raw.ch_names, ptp_values)}
+    }
+    
     # Save bad channel detection report
     log_content = (
         "Bad Channel Report\n"
         "---------------------------\n"
-        f"- Bad by peak-to-peak amplitude: {bad_details['bad_by_ptp']}\n"
-        f"- Bad by correlation: {bad_details['bad_by_correlation']}\n"
-        f"- Bad by deviation: {bad_details['bad_by_deviation']}\n"
-        f"- Final bad channels: {bads}\n"
+        f"- Bad by peak-to-peak amplitude: {details['bad_by_ptp']}\n"
+        f"- Bad by correlation: {details['bad_by_correlation']}\n"
+        f"- Bad by deviation: {details['bad_by_deviation']}\n"
+        f"- Final bad channels: {all_bads}\n"
     )
-    with open(paths['processing_log'], 'w') as f:
+    with open(paths['processing_log'], 'w') as f:        
         f.write(log_content)
-
-    return raw
-
+    
+    return all_bads
 
 def _ica_cleaning(raw, paths):
     """Perform hybrid automated/manual ICA artifact rejection."""
@@ -145,7 +223,6 @@ def _ica_cleaning(raw, paths):
     
     ica.exclude = auto_excluded
 
-    # ====================
     # Manual Fallback Phase
     # ====================
     if not ica.exclude:
@@ -203,7 +280,6 @@ def _ica_cleaning(raw, paths):
         ica.exclude = _get_valid_exclusion_input(ica.n_components_)
         plt.close('all')
 
-    # ====================
     # Reporting Phase
     # ====================
 
@@ -299,74 +375,6 @@ def _get_valid_exclusion_input(n_components):
         except ValueError:
             print("Invalid format. Use numbers like '0,2,3'")
 
-
-def _detect_bad_channels(raw):
-    """Bad channel detection optimized for Enobio 8 dry electrodes"""
-    # Ensure montage is set
-    if not raw.info['dig']:
-        raw.set_montage('standard_1020', match_case=False, on_missing='warn')
-    
-    # Initialize detector
-    noisy_detector = NoisyChannels(
-        raw,
-        random_state=42,
-        matlab_strict=False
-    )
-    
-    # 1. Peak-to-Peak thresholds
-    ptp_thresholds = {
-        'min_peak': 150e-6,   # 150 µV
-        'max_peak': 2500e-6   # 2500 µV
-    }
-    
-    # 2. Calculate PTP values
-    try:
-        ptp_values = _calculate_ptp_percentile(raw, percentile=95)
-    except ValueError as e:
-        raise RuntimeError(f"PTP calculation failed: {str(e)}")
-
-    # 3. Identify bad channels using ptp_values
-    bad_by_ptp = [
-        raw.ch_names[i] 
-        for i, ptp in enumerate(ptp_values)
-        if (ptp < ptp_thresholds['min_peak']) or (ptp > ptp_thresholds['max_peak'])
-    ]
-    
-    # 4. Adjusted correlation detection
-    noisy_detector.find_bad_by_correlation(
-        correlation_secs=4,        # 4s windows
-        correlation_threshold=0.3, # 0.3 correlation cutoff
-        frac_bad=0.15              # 15% bad windows allowed
-    )
-    
-    # 5. Adjusted deviation detection
-    noisy_detector.find_bad_by_deviation(
-        deviation_threshold=4.5    # 4.5 SD from median
-    )
-    
-    # Combine all bad channels
-    all_bads = list(set(
-        bad_by_ptp +
-        noisy_detector.bad_by_correlation +
-        noisy_detector.bad_by_deviation
-    ))
-    
-    # Final validation
-    if len(all_bads) == len(raw.ch_names):
-        raise ValueError("All channels flagged as bad! Check preprocessing.")
-    if len(all_bads) > len(raw.ch_names) // 2:
-        print("Over 50% channels flagged - manual inspection recommended")
-        all_bads = []  # Fallback to empty list
-    
-    # Prepare detailed results
-    details = {
-        "bad_by_ptp": bad_by_ptp,
-        "bad_by_correlation": noisy_detector.bad_by_correlation,
-        "bad_by_deviation": noisy_detector.bad_by_deviation,
-        "ptp_values": {ch: f"{ptp:.2e} V" for ch, ptp in zip(raw.ch_names, ptp_values)}
-    }
-    
-    return all_bads, details
 
 def _calculate_ptp_percentile(raw, percentile=95):
     """Calculate specified percentile of PTP in sliding windows"""
