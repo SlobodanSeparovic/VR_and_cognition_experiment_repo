@@ -25,20 +25,37 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     # Crop raw and save eeg    
     raw.crop(tmin=tmin, tmax=tmax)
     raw.save(paths['raw_fif'], overwrite=True)
+    # Plot and save raw .fif as PNG
+    fig = raw.plot_psd(show=False)
+    png_path = str(paths['raw_fif']).replace('.fif', '_psd.png')
+    fig.savefig(png_path, bbox_inches='tight')
+    plt.close(fig)
     
     # Basic processing (filtering) and save
     raw_filtered = _basic_filtering(raw, paths)
     raw_filtered.save(paths['filtered_fif'], overwrite=True)
+    fig = raw_filtered.plot_psd(show=False)
+    png_path = str(paths['filtered_fif']).replace('.fif', '_psd.png')
+    fig.savefig(png_path, bbox_inches='tight')
+    plt.close(fig)
     
     # Bad channel detection and deletion and save
     bads = _detect_bad_channels(raw_filtered, paths)
     raw_filtered.info['bads'] = bads
     raw_bads_dropped = raw_filtered.drop_channels(raw.info['bads'])
     raw_bads_dropped.save(paths['bad_channels_fif'], overwrite=True)
+    fig = raw_bads_dropped.plot_psd(show=False) 
+    png_path = str(paths['bad_channels_fif']).replace('.fif', '_psd.png')
+    fig.savefig(png_path, bbox_inches='tight')
+    plt.close(fig)
     
     # ICA and save
     raw_clean = _ica_cleaning(raw_bads_dropped, paths)
     raw_clean.save(paths['ica_fif'], overwrite=True)
+    fig = raw_filtered.plot_psd(show=False)
+    png_path = str(paths['ica_fif']).replace('.fif', '_psd.png')
+    fig.savefig(png_path, bbox_inches='tight')
+    plt.close(fig)
     
     
     return raw_clean
@@ -94,13 +111,6 @@ def _basic_filtering(raw, paths):
     # Filtering
     raw.filter(1, 40, fir_design='firwin')
     raw.notch_filter(50)
-    
-    # Save PSD plot as PNG
-    psd = raw.compute_psd(fmax=40)
-    fig_psd = psd.plot(show=False)
-    psd_path = os.path.join(paths['figures'], 'psd_before_cleaning.png')
-    fig_psd.savefig(psd_path, bbox_inches='tight')
-    plt.close(fig_psd)
 
     return raw
 
