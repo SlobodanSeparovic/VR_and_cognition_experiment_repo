@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import re
 
 def get_project_root(marker="settings.ini"):
     """Find project root by searching for a marker file."""
@@ -13,13 +14,12 @@ def get_paths(input_file, base_output_dir=None):
     """Generate paths without session numbers in the directory structure."""
     # Extract subject and task (ignore session)
     base_name = os.path.basename(input_file)
-    parts = base_name.split('_')
+       
+    # Subject extraction
+    subject = re.search(r'sub-([A-Za-z0-9]+)', base_name).group(1)
     
-    # Get subject (sub-P002 → P002)
-    subject = [p.split('-')[1] for p in parts if p.startswith('sub-')][0]
-    
-    # Get task (task-urban_3 → urban_3)
-    task = [p.split('-')[1] for p in parts if p.startswith('task-')][0]
+    # Task extraction: match everything after 'task-' up to the next underscore
+    task = re.search(r'task-([a-zA-Z0-9_]+?)(?=_run|$)', base_name).group(1)
 
     # Set base directory (auto-create /data if not specified)
     if not base_output_dir:
@@ -27,7 +27,7 @@ def get_paths(input_file, base_output_dir=None):
 
     # Define directory structure WITHOUT sessions
     path_template = {
-        'root': Path(base_output_dir) / f'subject-{subject}' / task,
+        'root': Path(base_output_dir) / subject / task,
         'raw': '00_raw',
         'filtered': '01_filtered',
         'bad_channels': '02_bad_channels',
