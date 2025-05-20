@@ -1,30 +1,23 @@
 import pandas as pd
+import re
 
-def process_nasatlx(nasatlx_stream, environment, nback):
+def process_nasatlx(nasatlx_stream):
     """Process NASA-TLX data and calculate Cognitive Load Index (CLI)"""
     nasatlx_data = nasatlx_stream['time_series'][0]
     
     # Create DataFrame with raw scores
     df = pd.DataFrame([nasatlx_data], columns=[
-        "Mental", "Physical", "Temporal", 
-        "Performance", "Effort", "Frustration"
+        'NasatlxMental', 'NasatlxPhysical', 'NadatlxTemporal', 
+        'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration'
     ])
     
     # Add metadata and calculate CLI
     df['Timestamp'] = nasatlx_stream['time_stamps'][-1]
-    df['Environment'] = environment
-    df['N'] = nback
     df['NasatlxCli'] = df[[
-        'Mental', 'Physical', 'Temporal',
-        'Performance', 'Effort', 'Frustration'
+        'NasatlxMental', 'NasatlxPhysical', 'NadatlxTemporal', 
+        'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration'
     ]].sum(axis=1)
-    
-    # Remove original TLX components
-    df.drop(columns=[
-        'Mental', 'Physical', 'Temporal',
-        'Performance', 'Effort', 'Frustration'
-    ], inplace=True)
-    
+     
     return df
 
 def process_game_performance(stream):
@@ -68,17 +61,38 @@ def process_in_game_df(df):
     rt_series = df['ReactionTime']
     avg_rt_correct = rt_series[df['AnswerCorrect'] == 1].mean()
     avg_rt_incorrect = rt_series[df['AnswerCorrect'] == 0].mean()
+    
+    # Rename environment
+    # Example full environment string
+    environment = df['Environment'].iloc[0]
+
+    # Extract the scene part (e.g., 'UrbanScene', 'NatureScene', 'ControlScene')
+    match = re.search(r'Unity\.(\w+)', environment)
+    if match:
+        environment = match.group(1)
+    else:
+        print(f"Warning: Could not extract environment.")
+        environment = "Unknown"
+
+    # Map to simplified environment name
+    mapping = {
+        'UrbanScene': 'Urban',
+        'NatureScene': 'Nature',
+        'ControlScene': 'Control'
+    }
+    environment = mapping.get(environment, environment)
 
     # Create and return df with single row
     # Create DataFrame and fill NaN
     result_df = pd.DataFrame([{
         'N': df['N'].iloc[0],
-        'Environment': df['Environment'].iloc[0],
-        'F1Score': round(f1, 4),
-        'AvgRtCorrect': round(avg_rt_correct, 4),
-        'AvgRtIncorrect': round(avg_rt_incorrect, 4),
+        'V': df['V'].iloc[0],
+        'Environment': environment,
+        'F1Score': round(f1, 6),
+        'AvgRtCorrect': round(avg_rt_correct, 6),
+        'AvgRtIncorrect': round(avg_rt_incorrect, 6),
         'TotalResponses': len(df),
-        'HitRate': f"{tp}/{ACTUAL_POSITIVES}"
+        'HitRate': round(tp / ACTUAL_POSITIVES, 6)
     }]).fillna(0)  # Fill NaN with 0
     
     return result_df

@@ -1,12 +1,15 @@
 from config.paths import get_paths
 import configparser
 import os
+import re
+import pandas as pd
 from data_processing import (
     read_xdf,
     preprocess_behavioral,
     preprocess_vr_motion,
     preprocess_eeg,
-    analyze_eeg
+    analyze_eeg,
+    save_participant_data
 )
 
 # Read settings.ini from the repo root
@@ -14,11 +17,14 @@ config = configparser.ConfigParser()
 # Read settings.ini from the same directory as main.py
 config_path = os.path.join(os.path.dirname(__file__), "settings.ini")
 config.read(config_path)
-
+input_file = config['INPUT']['input_file']
 
 def main(input_file):       
     # Read and align all data streams
     streams = read_xdf.load_xdf(input_file)
+    
+    # Extract participant ID from file path
+    participant_id = re.search(r'sub-(P\d+)', input_file).group(1)
     
     # Process game data to get precise task timing and clean DF
     clean_game_df, task_start, task_end = preprocess_behavioral.process_game_performance(streams['game'])
@@ -26,18 +32,11 @@ def main(input_file):
     # Process clean_game_df to get relevant metrics
     processed_game_df = preprocess_behavioral.process_in_game_df(clean_game_df)
     
-    print(processed_game_df)
-    
     # Process NASA-TLX with context from cleaned game data
     processed_nasatlx_df = preprocess_behavioral.process_nasatlx(
-        streams['nasatlx'],
-        processed_game_df['Environment'].iloc[0],
-        processed_game_df['N'].iloc[0]
+        streams['nasatlx']
     )
     
-    print(processed_nasatlx_df)
-    
-        
     # Process VR motion data during task
     motion_df = preprocess_vr_motion.calculate_kinematics(
         streams['motion'],
@@ -45,8 +44,6 @@ def main(input_file):
         task_end,
         buffer=0.2
     )
-    
-    print(motion_df)
     
     # Process EEG data (cropped to exact task period)
     raw_clean = preprocess_eeg.process_eeg(
@@ -56,27 +53,50 @@ def main(input_file):
         task_end
     )
     
-    # Add motion artifact annotations to EEG
-    
+    # Add motion artifact annotations to EEG    
     raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)
     
     # Analyze EEG and get cognitive indices
     eeg_indexes = analyze_eeg.calculate_indices(raw_clean)
     
+    # Create combined dataframe for saving
+    combined_df = pd.concat([
+        processed_game_df.drop(columns=['Environment', 'N', 'V']),
+        processed_nasatlx_df.drop(columns=['Timestamp'])
+        ], axis=1).assign(
+        Environment=processed_game_df['Environment'].iloc[0],
+        N=processed_game_df['N'].iloc[0],
+        V=processed_game_df['V'].iloc[0],
+        CognitiveLoadIndex=round(eeg_indexes['cognitive_load'], 6),
+        EngagementIndex=round(eeg_indexes['engagement'], 6),
+        ParticipantID=participant_id
+    )
+    
+    # Define the column order
+    cols_order = [
+        'ParticipantID', 'Environment', 'N', 'V', 'CognitiveLoadIndex', 'EngagementIndex'
+    ] + [col for col in combined_df.columns if col not in [
+        'ParticipantID', 'Environment', 'N', 'V', 'CognitiveLoadIndex', 'EngagementIndex'
+    ]]
+    
+    # Reorder the columns
+    combined_df = combined_df[cols_order]
+
+    # Save the data
+    save_participant_data.save_participant_data(combined_df, participant_id)
+    
     # Print results with aligned metrics
-    print(f"\nTask Duration: {task_end - task_start:.2f}s")
-    print(f"Cognitive Load Index: {eeg_indexes['cognitive_load']:.2f}")
-    print(f"Engagement Index: {eeg_indexes['engagement']:.2f}")
-    print(f"F1 Score: {processed_game_df['F1Score'].iloc[0]:.2f}")
+    print(combined_df)
     
     return {
         'nasatlx': processed_nasatlx_df,
         'motion': motion_df,
         'eeg': raw_clean,
-        'game': processed_game_df
+        'game': processed_game_df,
+        'cumulative' : combined_df
     }
 
 if __name__ == "__main__":
     # Run main with path to input file from congfig file
-    main(config['INPUT']['input_file'])
+    main(input_file)
     

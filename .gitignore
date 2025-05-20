@@ -2,3 +2,4 @@
 data/
 report/
 **/__pycache__/
+results/
