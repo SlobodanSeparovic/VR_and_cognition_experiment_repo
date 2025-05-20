@@ -1,0 +1,421 @@
+participant_id,baseline_order,environment,task,version
+Participant 1,Nature > Control > Urban
+,,Nature,3-back,Version 3
+,,Control,2-back,Version 3
+,,Urban,3-back,Version 1
+,,Nature,2-back,Version 2
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 1
+Participant 2,Nature > Control > Urban
+,,Control,3-back,Version 1
+,,Urban,3-back,Version 3
+,,Urban,2-back,Version 2
+,,Nature,3-back,Version 2
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 1
+Participant 3,Urban > Control > Nature
+,,Nature,2-back,Version 1
+,,Urban,2-back,Version 2
+,,Control,2-back,Version 3
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 2
+,,Control,3-back,Version 1
+Participant 4,Nature > Control > Urban
+,,Nature,2-back,Version 2
+,,Control,2-back,Version 1
+,,Control,3-back,Version 3
+,,Nature,3-back,Version 2
+,,Urban,3-back,Version 1
+,,Urban,2-back,Version 3
+Participant 5,Nature > Control > Urban
+,,Control,2-back,Version 1
+,,Nature,3-back,Version 3
+,,Control,3-back,Version 2
+,,Nature,2-back,Version 3
+,,Urban,2-back,Version 2
+,,Urban,3-back,Version 1
+Participant 6,Urban > Nature > Control
+,,Control,2-back,Version 2
+,,Control,3-back,Version 2
+,,Nature,2-back,Version 1
+,,Urban,3-back,Version 1
+,,Nature,3-back,Version 3
+,,Urban,2-back,Version 3
+Participant 7,Nature > Control > Urban
+,,Control,2-back,Version 2
+,,Urban,2-back,Version 1
+,,Control,3-back,Version 2
+,,Nature,2-back,Version 3
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 1
+Participant 8,Nature > Control > Urban
+,,Control,2-back,Version 2
+,,Urban,3-back,Version 1
+,,Nature,2-back,Version 3
+,,Urban,2-back,Version 1
+,,Nature,3-back,Version 3
+,,Control,3-back,Version 2
+Participant 9,Urban > Control > Nature
+,,Urban,2-back,Version 2
+,,Urban,3-back,Version 3
+,,Control,3-back,Version 2
+,,Nature,3-back,Version 1
+,,Control,2-back,Version 1
+,,Nature,2-back,Version 3
+Participant 10,Control > Nature > Urban
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 3
+,,Control,2-back,Version 2
+,,Nature,2-back,Version 1
+Participant 11,Control > Urban > Nature
+,,Urban,2-back,Version 2
+,,Nature,3-back,Version 2
+,,Urban,3-back,Version 1
+,,Control,2-back,Version 1
+,,Nature,2-back,Version 3
+,,Control,3-back,Version 3
+Participant 12,Nature > Control > Urban
+,,Urban,3-back,Version 2
+,,Nature,3-back,Version 1
+,,Urban,2-back,Version 2
+,,Control,2-back,Version 3
+,,Control,3-back,Version 3
+,,Nature,2-back,Version 1
+Participant 13,Control > Nature > Urban
+,,Nature,2-back,Version 1
+,,Control,2-back,Version 3
+,,Nature,3-back,Version 2
+,,Control,3-back,Version 3
+,,Urban,2-back,Version 2
+,,Urban,3-back,Version 1
+Participant 14,Control > Nature > Urban
+,,Urban,3-back,Version 2
+,,Nature,2-back,Version 3
+,,Urban,2-back,Version 2
+,,Control,3-back,Version 3
+,,Control,2-back,Version 1
+,,Nature,3-back,Version 1
+Participant 15,Control > Urban > Nature
+,,Control,2-back,Version 2
+,,Nature,2-back,Version 3
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 1
+Participant 16,Control > Urban > Nature
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 2
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 1
+Participant 17,Urban > Nature > Control
+,,Control,3-back,Version 3
+,,Nature,2-back,Version 1
+,,Urban,3-back,Version 2
+,,Urban,2-back,Version 3
+,,Control,2-back,Version 2
+,,Nature,3-back,Version 1
+Participant 18,Urban > Control > Nature
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 1
+,,Nature,3-back,Version 2
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 3
+,,Urban,2-back,Version 2
+Participant 19,Control > Urban > Nature
+,,Urban,3-back,Version 1
+,,Urban,2-back,Version 1
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 2
+,,Control,3-back,Version 3
+,,Nature,3-back,Version 2
+Participant 20,Urban > Control > Nature
+,,Control,2-back,Version 1
+,,Urban,3-back,Version 3
+,,Nature,3-back,Version 2
+,,Control,3-back,Version 1
+,,Nature,2-back,Version 2
+,,Urban,2-back,Version 3
+Participant 21,Urban > Nature > Control
+,,Nature,2-back,Version 3
+,,Control,3-back,Version 1
+,,Urban,2-back,Version 1
+,,Urban,3-back,Version 2
+,,Nature,3-back,Version 3
+,,Control,2-back,Version 2
+Participant 22,Nature > Urban > Control
+,,Urban,2-back,Version 3
+,,Control,2-back,Version 2
+,,Nature,3-back,Version 2
+,,Control,3-back,Version 3
+,,Urban,3-back,Version 1
+,,Nature,2-back,Version 1
+Participant 23,Urban > Control > Nature
+,,Control,3-back,Version 2
+,,Control,2-back,Version 2
+,,Nature,2-back,Version 1
+,,Urban,2-back,Version 3
+,,Nature,3-back,Version 1
+,,Urban,3-back,Version 3
+Participant 24,Urban > Nature > Control
+,,Nature,3-back,Version 1
+,,Control,2-back,Version 1
+,,Urban,3-back,Version 2
+,,Urban,2-back,Version 3
+,,Nature,2-back,Version 2
+,,Control,3-back,Version 3
+Participant 25,Nature > Urban > Control
+,,Urban,2-back,Version 3
+,,Nature,3-back,Version 2
+,,Urban,3-back,Version 3
+,,Nature,2-back,Version 1
+,,Control,2-back,Version 2
+,,Control,3-back,Version 1
+Participant 26,Urban > Nature > Control
+,,Urban,2-back,Version 1
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 2
+,,Nature,3-back,Version 3
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 2
+Participant 27,Nature > Control > Urban
+,,Nature,2-back,Version 3
+,,Nature,3-back,Version 1
+,,Control,3-back,Version 2
+,,Urban,3-back,Version 3
+,,Control,2-back,Version 2
+,,Urban,2-back,Version 1
+Participant 28,Nature > Urban > Control
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 2
+,,Nature,3-back,Version 3
+,,Control,2-back,Version 1
+,,Urban,2-back,Version 3
+,,Nature,2-back,Version 2
+Participant 29,Control > Urban > Nature
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 2
+,,Nature,2-back,Version 2
+,,Control,2-back,Version 1
+,,Urban,2-back,Version 3
+Participant 30,Control > Nature > Urban
+,,Urban,2-back,Version 1
+,,Urban,3-back,Version 2
+,,Nature,3-back,Version 1
+,,Nature,2-back,Version 2
+,,Control,2-back,Version 3
+,,Control,3-back,Version 3
+Participant 31,Control > Nature > Urban
+,,Urban,2-back,Version 1
+,,Urban,3-back,Version 2
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 2
+,,Nature,3-back,Version 1
+,,Control,3-back,Version 3
+Participant 32,Control > Nature > Urban
+,,Urban,3-back,Version 3
+,,Nature,3-back,Version 1
+,,Urban,2-back,Version 3
+,,Nature,2-back,Version 2
+,,Control,3-back,Version 2
+,,Control,2-back,Version 1
+Participant 33,Urban > Nature > Control
+,,Control,3-back,Version 1
+,,Urban,3-back,Version 2
+,,Nature,2-back,Version 3
+,,Urban,2-back,Version 1
+,,Control,2-back,Version 2
+,,Nature,3-back,Version 3
+Participant 34,Nature > Urban > Control
+,,Urban,2-back,Version 3
+,,Urban,3-back,Version 2
+,,Control,3-back,Version 1
+,,Nature,2-back,Version 2
+,,Nature,3-back,Version 3
+,,Control,2-back,Version 1
+Participant 35,Urban > Nature > Control
+,,Nature,2-back,Version 3
+,,Urban,3-back,Version 2
+,,Urban,2-back,Version 2
+,,Control,2-back,Version 1
+,,Nature,3-back,Version 1
+,,Control,3-back,Version 3
+Participant 36,Nature > Urban > Control
+,,Nature,3-back,Version 2
+,,Urban,2-back,Version 3
+,,Control,3-back,Version 3
+,,Control,2-back,Version 2
+,,Urban,3-back,Version 1
+,,Nature,2-back,Version 1
+Participant 37,Control > Urban > Nature
+,,Nature,2-back,Version 1
+,,Nature,3-back,Version 3
+,,Control,3-back,Version 2
+,,Urban,3-back,Version 1
+,,Urban,2-back,Version 2
+,,Control,2-back,Version 3
+Participant 38,Urban > Nature > Control
+,,Nature,3-back,Version 1
+,,Nature,2-back,Version 3
+,,Urban,2-back,Version 2
+,,Urban,3-back,Version 3
+,,Control,2-back,Version 1
+,,Control,3-back,Version 2
+Participant 39,Urban > Control > Nature
+,,Nature,2-back,Version 1
+,,Urban,3-back,Version 1
+,,Nature,3-back,Version 3
+,,Urban,2-back,Version 3
+,,Control,3-back,Version 2
+,,Control,2-back,Version 2
+Participant 40,Control > Nature > Urban
+,,Control,2-back,Version 2
+,,Nature,2-back,Version 1
+,,Control,3-back,Version 1
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 2
+,,Urban,2-back,Version 3
+Participant 41,Urban > Nature > Control
+,,Nature,3-back,Version 2
+,,Nature,2-back,Version 1
+,,Urban,2-back,Version 2
+,,Control,3-back,Version 3
+,,Urban,3-back,Version 1
+,,Control,2-back,Version 3
+Participant 42,Urban > Nature > Control
+,,Nature,2-back,Version 1
+,,Urban,3-back,Version 2
+,,Nature,3-back,Version 1
+,,Urban,2-back,Version 2
+,,Control,3-back,Version 3
+,,Control,2-back,Version 3
+Participant 43,Nature > Control > Urban
+,,Urban,2-back,Version 3
+,,Urban,3-back,Version 2
+,,Control,3-back,Version 1
+,,Control,2-back,Version 1
+,,Nature,2-back,Version 2
+,,Nature,3-back,Version 3
+Participant 44,Urban > Control > Nature
+,,Control,2-back,Version 1
+,,Nature,3-back,Version 3
+,,Urban,3-back,Version 1
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 2
+,,Nature,2-back,Version 3
+Participant 45,Control > Nature > Urban
+,,Nature,3-back,Version 3
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 2
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 1
+,,Urban,3-back,Version 1
+Participant 46,Control > Nature > Urban
+,,Control,2-back,Version 3
+,,Nature,2-back,Version 2
+,,Urban,2-back,Version 1
+,,Nature,3-back,Version 2
+,,Control,3-back,Version 1
+,,Urban,3-back,Version 3
+Participant 47,Control > Nature > Urban
+,,Urban,3-back,Version 1
+,,Nature,3-back,Version 3
+,,Control,2-back,Version 1
+,,Nature,2-back,Version 2
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 3
+Participant 48,Control > Nature > Urban
+,,Urban,3-back,Version 3
+,,Nature,2-back,Version 2
+,,Urban,2-back,Version 1
+,,Control,3-back,Version 1
+,,Control,2-back,Version 3
+,,Nature,3-back,Version 2
+Participant 49,Control > Urban > Nature
+,,Nature,2-back,Version 2
+,,Nature,3-back,Version 3
+,,Control,2-back,Version 1
+,,Control,3-back,Version 1
+,,Urban,2-back,Version 3
+,,Urban,3-back,Version 2
+Participant 50,Urban > Nature > Control
+,,Urban,2-back,Version 2
+,,Urban,3-back,Version 2
+,,Control,2-back,Version 3
+,,Nature,3-back,Version 1
+,,Control,3-back,Version 3
+,,Nature,2-back,Version 1
+Participant 51,Urban > Nature > Control
+,,Control,2-back,Version 1
+,,Urban,3-back,Version 3
+,,Urban,2-back,Version 2
+,,Nature,2-back,Version 3
+,,Control,3-back,Version 1
+,,Nature,3-back,Version 2
+Participant 52,Control > Urban > Nature
+,,Nature,2-back,Version 1
+,,Nature,3-back,Version 1
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 2
+,,Control,2-back,Version 3
+,,Urban,3-back,Version 3
+Participant 53,Urban > Nature > Control
+,,Urban,2-back,Version 1
+,,Nature,3-back,Version 1
+,,Urban,3-back,Version 3
+,,Control,3-back,Version 2
+,,Nature,2-back,Version 2
+,,Control,2-back,Version 3
+Participant 54,Urban > Nature > Control
+,,Nature,2-back,Version 1
+,,Control,2-back,Version 2
+,,Urban,2-back,Version 3
+,,Nature,3-back,Version 1
+,,Urban,3-back,Version 2
+,,Control,3-back,Version 3
+Participant 55,Urban > Nature > Control
+,,Urban,3-back,Version 1
+,,Urban,2-back,Version 1
+,,Nature,3-back,Version 2
+,,Control,3-back,Version 3
+,,Control,2-back,Version 3
+,,Nature,2-back,Version 2
+Participant 56,Control > Nature > Urban
+,,Nature,3-back,Version 1
+,,Control,3-back,Version 2
+,,Nature,2-back,Version 2
+,,Urban,2-back,Version 3
+,,Urban,3-back,Version 3
+,,Control,2-back,Version 1
+Participant 57,Urban > Control > Nature
+,,Control,2-back,Version 1
+,,Control,3-back,Version 2
+,,Nature,3-back,Version 1
+,,Urban,3-back,Version 3
+,,Urban,2-back,Version 2
+,,Nature,2-back,Version 3
+Participant 58,Urban > Nature > Control
+,,Urban,3-back,Version 1
+,,Nature,3-back,Version 3
+,,Urban,2-back,Version 2
+,,Control,3-back,Version 2
+,,Nature,2-back,Version 1
+,,Control,2-back,Version 3
+Participant 59,Urban > Control > Nature
+,,Nature,2-back,Version 3
+,,Control,2-back,Version 1
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 2
+,,Urban,3-back,Version 1
+,,Nature,3-back,Version 3
+Participant 60,Nature > Control > Urban
+,,Urban,3-back,Version 3
+,,Control,3-back,Version 2
+,,Urban,2-back,Version 3
+,,Nature,2-back,Version 1
+,,Control,2-back,Version 2
+,,Nature,3-back,Version 1
