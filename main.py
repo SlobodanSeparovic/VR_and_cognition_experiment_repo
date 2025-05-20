@@ -26,16 +26,18 @@ def main(input_file):
     # Extract participant ID from file path
     participant_id = re.search(r'sub-(P\d+)', input_file).group(1)
     
-    # Process game data to get precise task timing and clean DF
-    clean_game_df, task_start, task_end = preprocess_behavioral.process_game_performance(streams['game'])
+    # Process game data with metadata
+    clean_game_df, game_meta = preprocess_behavioral.process_game_performance(streams['game'])
     
-    # Process clean_game_df to get relevant metrics
-    processed_game_df = preprocess_behavioral.process_in_game_df(clean_game_df)
+     #Extract task start and end times
+    task_start = game_meta['Started']
+    task_end = game_meta['Finished']
+    
+    # Process metrics and handle empty data (control condition)
+    processed_game_df = preprocess_behavioral.process_in_game_df(clean_game_df, game_meta)
     
     # Process NASA-TLX with context from cleaned game data
-    processed_nasatlx_df = preprocess_behavioral.process_nasatlx(
-        streams['nasatlx']
-    )
+    processed_nasatlx_df = preprocess_behavioral.process_nasatlx(streams['nasatlx'])
     
     # Process VR motion data during task
     motion_df = preprocess_vr_motion.calculate_kinematics(
@@ -87,6 +89,7 @@ def main(input_file):
     
     # Print results with aligned metrics
     print(combined_df)
+    print(game_meta)
     
     return {
         'nasatlx': processed_nasatlx_df,
