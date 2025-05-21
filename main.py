@@ -9,8 +9,7 @@ from data_processing import (
     preprocess_vr_motion,
     preprocess_eeg,
     analyze_eeg,
-    save_participant_data,
-    process_directory
+    save_participant_data
 )
 
 # Read settings.ini from the repo root
@@ -101,8 +100,5 @@ def main(input_file):
     }
 
 if __name__ == "__main__":
-    # Get base directory from config file
-    base_dir = os.path.dirname(input_file)  # Directory of the configured file
-    
-    # Process all XDF files in that directory
-    process_directory.process_directory(base_dir)
+    # Run main with path to input file from congfig file
+    main(input_file)
