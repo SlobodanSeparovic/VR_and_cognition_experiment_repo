@@ -88,10 +88,6 @@ def main(input_file):
     # Save the data
     save_participant_data.save_participant_data(combined_df, participant_id)
     
-    # Print results with aligned metrics
-    print(combined_df)
-    print(game_meta)
-    
     return {
         'nasatlx': processed_nasatlx_df,
         'motion': motion_df,

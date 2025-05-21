@@ -61,8 +61,7 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     return raw_clean
 
 def flag_eeg_artifacts_from_motion(raw, motion_df):
-    """
-    Annotate EEG with motion artifacts based on pre-buffered motion_df.
+    """Annotate EEG with motion artifacts based on pre-buffered motion_df.
     Each contiguous block of MotionArtifact==True is marked as one annotation.
     """
     # Find contiguous artifact blocks
@@ -120,17 +119,10 @@ def _detect_bad_channels(raw, paths):
     if not raw.info['dig']:
         raw.set_montage('standard_1020', match_case=False, on_missing='warn')
     
-    # Initialize detector
-    noisy_detector = NoisyChannels(
-        raw,
-        random_state=42,
-        matlab_strict=False
-    )
-    
-    # 1. Peak-to-Peak thresholds
+    # Dry electrode adjustments
     ptp_thresholds = {
-        'min_peak': 50e-6,   
-        'max_peak': 5000e-6   # 2500 µV
+        'min_peak': 15e-6,   # Compensate for higher noise floor
+        'max_peak': 350e-6   # Account for reduced signal amplitude
     }
     
     # 2. Calculate PTP values
@@ -146,65 +138,51 @@ def _detect_bad_channels(raw, paths):
         if (ptp < ptp_thresholds['min_peak']) or (ptp > ptp_thresholds['max_peak'])
     ]
     
-    # 4. Adjusted correlation detection
-    noisy_detector.find_bad_by_correlation(
-        correlation_secs=2,        # 2s windows
-        correlation_threshold=0.25, # 0.25 correlation cutoff
-        frac_bad=0.25              # 25% bad windows allowed
-    )
-    
-    # 5. Adjusted deviation detection
-    noisy_detector.find_bad_by_deviation(
-        deviation_threshold= 3.0    # 3.0 SD from median
-    )
-    
-    # Combine all bad channels
-    all_bads = list(set(
-        bad_by_ptp +
-        noisy_detector.bad_by_correlation +
-        noisy_detector.bad_by_deviation
-    ))
-    
-    # Final validation
-    if len(all_bads) == len(raw.ch_names):
-        raise ValueError("All channels flagged as bad! Check preprocessing.")
-    if len(all_bads) > len(raw.ch_names) // 2:
-        print("Over 50% channels flagged - manual inspection recommended")
+    # 4. Final validation
+    good_channels = [ch for ch in raw.ch_names if ch not in bad_by_ptp]
+    has_frontal = any(ch.startswith('F') for ch in good_channels)
+    has_parietal = any(ch.startswith('P') for ch in good_channels)
     
     # Prepare detailed results
     details = {
         "bad_by_ptp": bad_by_ptp,
-        "bad_by_correlation": noisy_detector.bad_by_correlation,
-        "bad_by_deviation": noisy_detector.bad_by_deviation,
-        "ptp_values": {ch: f"{ptp:.2e} V" for ch, ptp in zip(raw.ch_names, ptp_values)}
+        "ptp_values": {ch: f"{ptp:.2e} V" for ch, ptp in zip(raw.ch_names, ptp_values)},
+        "frontal_remaining": has_frontal,
+        "parietal_remaining": has_parietal
     }
     
-    # Save bad channel detection report
+    # 5. Build log content
     log_content = (
         "Bad Channel Report\n"
         "---------------------------\n"
         f"- Bad by peak-to-peak amplitude: {details['bad_by_ptp']}\n"
-        f"- Bad by correlation: {details['bad_by_correlation']}\n"
-        f"- Bad by deviation: {details['bad_by_deviation']}\n"
-        f"- Final bad channels: {all_bads}\n"
-    )
+        f"- Frontal channels remaining: {has_frontal}\n"
+        f"- Parietal channels remaining: {has_parietal}\n"
+        f"- PTP values:\n"
+    ) + "\n".join([f"  {ch}: {val}" for ch, val in details['ptp_values'].items()])
+    
+    # Add critical error if missing regions
+    if not (has_frontal and has_parietal):
+        log_content += "\n\nERROR: Insufficient channels for index calculation - "
+        log_content += "requires at least one frontal and one parietal channel!"
+    
     with open(paths['processing_log'], 'w') as f:        
         f.write(log_content)
     
-    return all_bads
+    return bad_by_ptp
 
 def _ica_cleaning(raw, paths):
-    """Perform hybrid automated/manual ICA artifact rejection."""
+    """Perform automated ICA artifact rejection for eye blinks."""
     # Ensure figures directory exists
     os.makedirs(paths['figures'], exist_ok=True)
     
     # Initialize and fit ICA
     ica = ICA(
-        n_components=0.95,        # Retains 95% variance (good for noisy dry EEG)
-        method='infomax',         # Handles sub-Gaussian sources (e.g., blinks)
-        max_iter=1000,            # ICA converges better in high-noise scenarios
-        random_state=42,          # Ensures reproducibility
-        fit_params=dict(extended=True)  # Better for non-Gaussian artifacts
+        n_components=0.95,
+        method='infomax',
+        max_iter=1000,
+        random_state=42,
+        fit_params=dict(extended=True)
     )
     ica.fit(raw)
 
@@ -212,100 +190,47 @@ def _ica_cleaning(raw, paths):
     components_dir = os.path.join(paths['figures'], 'ica_components')
     os.makedirs(components_dir, exist_ok=True)
 
-    # ====================
-    # Automated Exclusion Phase
-    # ====================
+    # Generate and save individual component plots
+    print("\nGenerating component detail plots...")
+    for comp in range(ica.n_components_):
+        fig_comp = ica.plot_properties(raw, picks=comp, show=False)
+        fig_comp[0].savefig(os.path.join(components_dir, f'component_{comp:02d}.png'),
+                            bbox_inches='tight')
+        plt.close(fig_comp[0])
+    print("Component details saved to:", components_dir)
+
+    # Automated Exclusion---------------
     auto_excluded = []
+    ic_labels = None
     try:
         ic_labels = label_components(raw, ica, method="iclabel")
         
-        # Automatically exclude eye components with >65% confidence
+        # Automatically exclude ALL eye components regardless of confidence
         auto_excluded = [
-            idx for idx, (label, prob) in enumerate(zip(
-                ic_labels['labels'], 
-                ic_labels['y_pred_proba']
-            )) 
-            if label == 'eye' and prob > 0.65
+            idx for idx, label in enumerate(ic_labels['labels'])
+            if label == 'eye'
         ]
         
     except Exception as e:
-        print(f"ICLabel Error: {str(e)} - Proceeding to manual inspection")
+        print(f"ICLabel Error: {str(e)} - Continuing without component exclusion")
     
     ica.exclude = auto_excluded
 
-    # Manual Fallback Phase
-    # ====================
-    if not ica.exclude:
-        print("\nNo components met automatic exclusion criteria.")
-        print("Launching manual component inspection...")
-
-        # 1. Generate component plots FIRST to avoid output spam
-        print("\nGenerating component detail plots...")
-        for comp in range(ica.n_components_):
-            fig_comp = ica.plot_properties(raw, picks=comp, show=False)
-            fig_comp[0].savefig(os.path.join(components_dir, f'component_{comp:02d}.png'),
-                                bbox_inches='tight')
-            plt.close(fig_comp[0])
-        print("Component details saved to:", components_dir)
-
-        # 2. Create optimized figure layout
-        fig = plt.figure(figsize=(12, 7), dpi=100, num="ICA Component Inspection")  # Reduced size
-        gs = gridspec.GridSpec(3, 1, height_ratios=[1.5, 1.5, 1], hspace=0.4)  # Simplified grid
-
-        # Component grid (2x4)
-        comp_grid = gridspec.GridSpecFromSubplotSpec(2, 4, subplot_spec=gs[0:2], hspace=0.2, wspace=0.15)
-        axes = []
-        for i in range(min(ica.n_components_, 8)):
-            ax = fig.add_subplot(comp_grid[i//4, i%4])
-            ica.plot_components(picks=i, axes=ax, show=False, res=32)  # Lower resolution
-            ax.set_title(f"Component {i}", fontsize=9)  # Smaller title
-
-        # Text panel with manual spacing
-        ax_text = fig.add_subplot(gs[2])
-        ax_text.axis('off')
-
-        # Compact text formatting
-        class_text = ["ICLabel classifications (Close window to exclude components):"]
-        if 'ic_labels' in locals():
-            for comp in range(ica.n_components_):
-                label = ic_labels['labels'][comp]
-                prob = ic_labels['y_pred_proba'][comp]
-                class_text.append(f"ICA Component {comp}: {prob:.0%} confident this is {label}{'*' if label == 'other' else ''}")
-            class_text.append("")
-            class_text.append("Confidence percentages indicate the classifier's confidence in the label.")
-            class_text.append("*ICs containing indeterminate noise or ICs containing multiple signals that ICA decomposition could not separate well.")
-        else:
-            class_text.append("ICLabel unavailable")
-
-        ax_text.text(0.01, 0.95, "\n".join(class_text),
-                    fontfamily='monospace', fontsize=8,  # Smaller font
-                    verticalalignment='top',
-                    transform=ax_text.transAxes)
-
-        # Manual layout adjustments (avoids tight_layout warning)
-        plt.subplots_adjust(left=0.05, right=0.95, top=0.92, bottom=0.08)
-        plt.show(block=True)
-
-        # 3. Get user input after closing figure
-        ica.exclude = _get_valid_exclusion_input(ica.n_components_)
-        plt.close('all')
-
-    # Reporting Phase
-    # ====================
-
+    # Reporting Phase---------------
     fig = plt.figure(figsize=(14, 8), dpi=100)
     gs = gridspec.GridSpec(nrows=3, ncols=4, height_ratios=[2, 2, 1])
 
-    # Plot all components in a 2x4 grid (up to 8 components)
+    # Plot components in grid
     for i in range(min(ica.n_components_, 8)):
         ax = fig.add_subplot(gs[i // 4, i % 4])
         ica.plot_components(picks=i, axes=ax, show=False, res=32)
-        # Mark excluded with a big red X
         if i in ica.exclude:
-            ax.text(0.5, 0.5, 'X', color='red', fontsize=50, ha='center', va='center', transform=ax.transAxes, weight='bold')
+            ax.text(0.5, 0.5, 'X', color='red', fontsize=50, 
+                    ha='center', va='center', transform=ax.transAxes, 
+                    weight='bold')
         ax.set_title(f"ICA Component {i}", fontsize=9)
 
-    # ICLabel results and instructions in a wide text box at the bottom
+    # Report text
     ax_text = fig.add_subplot(gs[2, :])
     ax_text.axis('off')
 
@@ -317,27 +242,21 @@ def _ica_cleaning(raw, paths):
     report_text = [
         "ICA ARTIFACT REJECTION REPORT",
         "============================",
-        f"Exclusion mode: {'AUTOMATIC' if auto_excluded else 'MANUAL'}",
         f"Excluded components: {ica.exclude}",
         f"Variance retained: {var_explained:.1%}",
-        "",
-        "ICLabel classifications for each component:"
+        ""
     ]
 
-    if 'ic_labels' in locals() and ic_labels is not None:
+    if ic_labels is not None:
+        report_text.append("ICLabel classifications:")
         for comp in range(ica.n_components_):
             label = ic_labels['labels'][comp]
             prob = ic_labels['y_pred_proba'][comp]
-            line = f"ICA Component {comp}: {prob:.0%} confident this is {label}"
-            if label == 'other':
-                line += "*"
-            report_text.append(line)
+            report_text.append(
+                f"Component {comp}: {label} ({prob:.0%} confidence)"
+            )
     else:
-        report_text.append("ICLabel classification unavailable.")
-
-    report_text.append("")
-    report_text.append("Confidence percentages indicate the classifier's confidence in the label.")
-    report_text.append("*ICs containing indeterminate noise or ICs containing multiple signals that ICA decomposition could not separate well.")
+        report_text.append("ICLabel classification unavailable")
 
     ax_text.text(
         0.01, 0.99, "\n".join(report_text),
@@ -349,41 +268,18 @@ def _ica_cleaning(raw, paths):
         bbox=dict(facecolor='white', alpha=0.95)
     )
 
-    plt.tight_layout(pad=1.0)
-    plt.subplots_adjust(top=0.92, bottom=0.08)
-
-    # Save and close report
+    # Save and close
     save_path = os.path.join(paths['figures'], 'ica_report.png')
     fig.savefig(save_path, bbox_inches='tight')
     plt.close(fig)
 
-    # Save detailed log
+    # Save log
     with open(paths['ica_rejection_log'], 'w') as f:
         f.write("\n".join(report_text))
         if ica.exclude:
-            f.write("\nExclusion rationale:\n")
-            if auto_excluded:
-                f.write("- Automatic: Eye components with >80% confidence\n")
-            else:
-                f.write("- Manual: User-selected during inspection\n")
+            f.write("\n\nExclusion rationale: Automatic eye component removal")
 
     return ica.apply(raw)
-
-
-def _get_valid_exclusion_input(n_components):
-    """Validate component exclusion input with enhanced checks."""
-    while True:
-        exclude = input("Enter components to exclude (comma-separated): ").strip()
-        if not exclude:
-            return []
-        try:
-            excluded = list(map(int, exclude.split(',')))
-            unique_excluded = list(set(excluded))  # Remove duplicates
-            if all(0 <= c < n_components for c in unique_excluded):
-                return unique_excluded
-            print(f"Invalid components! Valid range: 0-{n_components-1}")
-        except ValueError:
-            print("Invalid format. Use numbers like '0,2,3'")
 
 
 def _calculate_ptp_percentile(raw, percentile=95):
