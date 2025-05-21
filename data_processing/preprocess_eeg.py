@@ -121,8 +121,8 @@ def _detect_bad_channels(raw, paths):
     
     # Dry electrode adjustments
     ptp_thresholds = {
-        'min_peak': 15e-6,   # Compensate for higher noise floor
-        'max_peak': 350e-6   # Account for reduced signal amplitude
+        'min_peak': 10e-6,   # Dry electrodes' higher impedance increases baseline noise.
+        'max_peak': 300e-6   # Balances artifact rejection with signal preservation:
     }
     
     # 2. Calculate PTP values
