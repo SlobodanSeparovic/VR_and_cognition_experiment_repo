@@ -1,4 +1,5 @@
 import random
+import csv
 
 # Function to generate randomized order for each participant
 def randomize_experiment_order(participants):
@@ -45,26 +46,43 @@ def randomize_experiment_order(participants):
     
     return randomized_orders
 
-# Function to print the randomized order in a readable format
-def print_randomized_order(randomized_orders):
-    for participant, data in randomized_orders.items():
-        print(f"Participant: {participant}")
-        print("Baseline Measurement Order:")
-        print(f"  {', '.join(data['baseline'])}")
-        print("Task Assignments:")
-        for (environment, task), version in data['task_assignments'].items():
-            print(f"  Environment: {environment}, Task: {task} => {version}")
-        print()
+# Function to save randomized order to a CSV file
+def save_random_seq_csv(randomized_orders, filename):
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        
+        # Header row
+        writer.writerow([
+            'participant_id',
+            'baseline_order',
+            'environment',
+            'task',
+            'version'
+        ])
+        
+        # Data rows
+        for participant, data in randomized_orders.items():
+            baseline_str = ' > '.join(data['baseline'])
+            writer.writerow([
+                participant,
+                baseline_str
+                ])
+            
+            for(environment,task), version in data['task_assignments'].items():
+                writer.writerow([
+                    '',
+                    '',
+                    environment,
+                    task,
+                    version
+                    ])
 
 if __name__ == "__main__":
-    # Ask for the participant number
-    participant_number = int(input("Enter the participant number: "))
-    
-    # Generate a list with a single participant based on the entered number
-    participants = [f'Participant {participant_number}']
-    
-    # Generate randomized order for the participant
+    # Create 60 participants
+    participants = [f'Participant {i+1}' for i in range(60)]
     randomized_orders = randomize_experiment_order(participants)
-    
-    # Print the randomized order for the participant
-    print_randomized_order(randomized_orders)
+
+    # Save to CSV 
+    save_random_seq_csv(randomized_orders, 'random_seqs.csv')
+
+    print("Randomized sequences saved to 'random_seqs.csv'.")
