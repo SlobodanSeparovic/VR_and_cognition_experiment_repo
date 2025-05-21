@@ -102,4 +102,3 @@ def main(input_file):
 if __name__ == "__main__":
     # Run main with path to input file from congfig file
     main(input_file)
-    
