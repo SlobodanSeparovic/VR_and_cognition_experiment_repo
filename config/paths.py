@@ -25,13 +25,14 @@ def get_paths(input_file, base_output_dir=None):
     if not base_output_dir:
         base_output_dir = get_project_root() / 'data'
 
-    # Define directory structure WITHOUT sessions
+    # Define directory structure with no sessions
     path_template = {
         'root': Path(base_output_dir) / subject / task,
         'raw': '00_raw',
         'filtered': '01_filtered',
-        'bad_channels': '02_bad_channels',
+        'bad_channels_1': '02_bad_channels_1',
         'ica': '03_ica_cleaned',
+        'bad_channels_2': '02_bad_channels_2',
         'figures': 'reports/figures',
         'logs': 'reports/logs'
     }
@@ -50,11 +51,13 @@ def get_paths(input_file, base_output_dir=None):
         'task': task,
         'raw_fif': Path(paths['raw']) / f'{base_stem}_raw.fif',
         'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered.fif',
-        'bad_channels_fif': Path(paths['bad_channels']) / f'{base_stem}_badchansremoved.fif',
+        'bad_channels_1_fif': Path(paths['bad_channels_1']) / f'{base_stem}_badchansremoved_1.fif',
+        'bad_channels_2_fif': Path(paths['bad_channels_2']) / f'{base_stem}_badchansremoved_2.fif',
         'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned.fif',
-        'processing_log': Path(paths['logs']) / f'{base_stem}_processing_log.txt',
+        'bad_channels_1_log': Path(paths['logs']) / f'{base_stem}_bad_channels_1_log.txt',
+        'bad_channels_2_log': Path(paths['logs']) / f'{base_stem}_bad_channels_2_log.txt',
         'ica_report': Path(paths['figures']) / f'{base_stem}_ica_report.png',
-        'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt' 
+        'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt'
     })
 
     return paths

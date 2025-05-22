@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import os
-from pyprep.find_noisy_channels import NoisyChannels
 from mne_icalabel import label_components
 from mne import make_fixed_length_events
 from config.paths import get_paths
@@ -26,39 +25,48 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     raw.crop(tmin=tmin, tmax=tmax)
     raw.save(paths['raw_fif'], overwrite=True)
     # Plot and save raw .fif as PNG
-    fig = raw.plot_psd(show=False)
+    fig = raw.compute_psd().plot(show=False)
     png_path = str(paths['raw_fif']).replace('.fif', '_psd.png')
     fig.savefig(png_path, bbox_inches='tight')
     plt.close(fig)
     
     # Basic processing (filtering) and save
-    raw_filtered = _basic_filtering(raw, paths)
+    raw_filtered = _basic_filtering(raw)
     raw_filtered.save(paths['filtered_fif'], overwrite=True)
-    fig = raw_filtered.plot_psd(show=False)
+    fig = raw_filtered.compute_psd().plot(show=False)
     png_path = str(paths['filtered_fif']).replace('.fif', '_psd.png')
     fig.savefig(png_path, bbox_inches='tight')
     plt.close(fig)
     
-    # Bad channel detection and deletion and save
-    bads = _detect_bad_channels(raw_filtered, paths)
+    # Bad channel detection 1, looser, deletion and save-remove severe artifacts
+    bads = _detect_bad_channels(raw_filtered, paths, min_peak=20e-6, max_peak=500e-6, pre_ica=True)
     raw_filtered.info['bads'] = bads
-    raw_bads_dropped = raw_filtered.drop_channels(raw.info['bads'])
-    raw_bads_dropped.save(paths['bad_channels_fif'], overwrite=True)
-    fig = raw_bads_dropped.plot_psd(show=False) 
-    png_path = str(paths['bad_channels_fif']).replace('.fif', '_psd.png')
+    raw_bads_dropped = raw_filtered.drop_channels(bads)
+    raw_bads_dropped.save(paths['bad_channels_1_fif'], overwrite=True)
+    fig = raw_bads_dropped.compute_psd().plot(show=False) 
+    png_path = str(paths['bad_channels_1_fif']).replace('.fif', '_psd.png')
     fig.savefig(png_path, bbox_inches='tight')
     plt.close(fig)
     
     # ICA and save
-    raw_clean = _ica_cleaning(raw_bads_dropped, paths)
-    raw_clean.save(paths['ica_fif'], overwrite=True)
-    fig = raw_filtered.plot_psd(show=False)
+    raw_ica = _ica_cleaning(raw_bads_dropped, paths)
+    raw_ica.save(paths['ica_fif'], overwrite=True)
+    fig = raw_ica.compute_psd().plot(show=False)
     png_path = str(paths['ica_fif']).replace('.fif', '_psd.png')
     fig.savefig(png_path, bbox_inches='tight')
     plt.close(fig)
+
+    # Bad channel detection 2-stricter, deletion and save -remove residual artifacts
+    bads = _detect_bad_channels(raw_ica, paths, min_peak=5e-6, max_peak=150e-6, pre_ica=False)
+    raw_ica.info['bads'] = bads
+    raw_bads_dropped_2 = raw_ica.drop_channels(bads)
+    raw_bads_dropped_2.save(paths['bad_channels_2_fif'], overwrite=True)
+    fig = raw_bads_dropped_2.compute_psd().plot(show=False)
+    png_path = str(paths['bad_channels_2_fif']).replace('.fif', '_psd.png')
+    fig.savefig(png_path, bbox_inches='tight')
+    plt.close(fig)
     
-    
-    return raw_clean
+    return raw_bads_dropped_2
 
 def flag_eeg_artifacts_from_motion(raw, motion_df):
     """Annotate EEG with motion artifacts based on pre-buffered motion_df.
@@ -106,24 +114,18 @@ def _create_raw(stream):
     
     return mne.io.RawArray(eeg_data, info)
 
-def _basic_filtering(raw, paths):
+def _basic_filtering(raw):
     # Filtering
-    raw.filter(1, 40, fir_design='firwin')
+    raw.filter(2, 40, fir_design='firwin')
     raw.notch_filter(50)
 
     return raw
 
-def _detect_bad_channels(raw, paths):
+def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
     """Bad channel detection optimized for Enobio 8 dry electrodes"""
     # Ensure montage is set
     if not raw.info['dig']:
         raw.set_montage('standard_1020', match_case=False, on_missing='warn')
-    
-    # Dry electrode adjustments
-    ptp_thresholds = {
-        'min_peak': 10e-6,   # Dry electrodes' higher impedance increases baseline noise.
-        'max_peak': 300e-6   # Balances artifact rejection with signal preservation:
-    }
     
     # 2. Calculate PTP values
     try:
@@ -135,7 +137,7 @@ def _detect_bad_channels(raw, paths):
     bad_by_ptp = [
         raw.ch_names[i] 
         for i, ptp in enumerate(ptp_values)
-        if (ptp < ptp_thresholds['min_peak']) or (ptp > ptp_thresholds['max_peak'])
+        if (ptp < min_peak) or (ptp > max_peak)
     ]
     
     # 4. Final validation
@@ -166,8 +168,12 @@ def _detect_bad_channels(raw, paths):
         log_content += "\n\nERROR: Insufficient channels for index calculation - "
         log_content += "requires at least one frontal and one parietal channel!"
     
-    with open(paths['processing_log'], 'w') as f:        
-        f.write(log_content)
+    if pre_ica:
+        with open(paths['bad_channels_1_log'], 'w') as f:        
+            f.write(log_content)
+    else:
+        with open(paths['bad_channels_2_log'], 'w') as f:        
+            f.write(log_content)
     
     return bad_by_ptp
 
@@ -178,7 +184,7 @@ def _ica_cleaning(raw, paths):
     
     # Initialize and fit ICA
     ica = ICA(
-        n_components=0.95,
+        n_components=0.999999,
         method='infomax',
         max_iter=1000,
         random_state=42,
@@ -208,7 +214,7 @@ def _ica_cleaning(raw, paths):
         # Automatically exclude ALL eye components regardless of confidence
         auto_excluded = [
             idx for idx, label in enumerate(ic_labels['labels'])
-            if label == 'eye'
+            if 'eye' in label
         ]
         
     except Exception as e:
@@ -282,7 +288,7 @@ def _ica_cleaning(raw, paths):
     return ica.apply(raw)
 
 
-def _calculate_ptp_percentile(raw, percentile=95):
+def _calculate_ptp_percentile(raw, percentile):
     """Calculate specified percentile of PTP in sliding windows"""
     # Create events with duration validation
     duration = 1.0
