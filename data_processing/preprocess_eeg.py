@@ -214,7 +214,7 @@ def _ica_cleaning(raw, paths):
         # Automatically exclude ALL eye components regardless of confidence
         auto_excluded = [
             idx for idx, label in enumerate(ic_labels['labels'])
-            if 'eye' in label
+            if 'brain' not in label
         ]
         
     except Exception as e:
