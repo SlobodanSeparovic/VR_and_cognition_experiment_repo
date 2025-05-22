@@ -50,11 +50,14 @@ def get_paths(input_file, base_output_dir=None):
         'task': task,
         'raw_fif': Path(paths['raw']) / f'{base_stem}_raw.fif',
         'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered.fif',
-        'bad_channels_fif': Path(paths['bad_channels']) / f'{base_stem}_badchansremoved.fif',
+        'otp_fif': Path(paths['filtered']) / f'{base_stem}_otp.fif',  # NEW OTP PATH
+        'bad_channels_1_fif': Path(paths['bad_channels']) / f'{base_stem}_badchans1.fif',  # Renamed
+        'bad_channels_2_fif': Path(paths['bad_channels']) / f'{base_stem}_badchans2.fif',  # New post-ICA
         'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned.fif',
-        'processing_log': Path(paths['logs']) / f'{base_stem}_processing_log.txt',
+        'bad_channels_log_1': Path(paths['logs']) / f'{base_stem}_badchans_preica.txt',
+        'bad_channels_log_2': Path(paths['logs']) / f'{base_stem}_badchans_postica.txt',
         'ica_report': Path(paths['figures']) / f'{base_stem}_ica_report.png',
-        'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt' 
+        'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt'
     })
 
     return paths

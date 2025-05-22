@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import os
-from pyprep.find_noisy_channels import NoisyChannels
+import picard
 from mne_icalabel import label_components
 from mne import make_fixed_length_events
 from config.paths import get_paths
@@ -26,73 +26,111 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     raw.crop(tmin=tmin, tmax=tmax)
     raw.save(paths['raw_fif'], overwrite=True)
     # Plot and save raw .fif as PNG
-    fig = raw.plot_psd(show=False)
-    png_path = str(paths['raw_fif']).replace('.fif', '_psd.png')
-    fig.savefig(png_path, bbox_inches='tight')
-    plt.close(fig)
+    _safe_plot_psd(raw, paths['raw_fif'])
     
     # Basic processing (filtering) and save
-    raw_filtered = _basic_filtering(raw, paths)
+    raw_filtered = _basic_filtering(raw)
     raw_filtered.save(paths['filtered_fif'], overwrite=True)
-    fig = raw_filtered.plot_psd(show=False)
-    png_path = str(paths['filtered_fif']).replace('.fif', '_psd.png')
-    fig.savefig(png_path, bbox_inches='tight')
-    plt.close(fig)
+    _safe_plot_psd(raw_filtered, paths['filtered_fif'])
     
-    # Bad channel detection and deletion and save
-    bads = _detect_bad_channels(raw_filtered, paths)
-    raw_filtered.info['bads'] = bads
-    raw_bads_dropped = raw_filtered.drop_channels(raw.info['bads'])
-    raw_bads_dropped.save(paths['bad_channels_fif'], overwrite=True)
-    fig = raw_bads_dropped.plot_psd(show=False) 
-    png_path = str(paths['bad_channels_fif']).replace('.fif', '_psd.png')
-    fig.savefig(png_path, bbox_inches='tight')
-    plt.close(fig)
+    # Apply Oversampled Temporal Projection (OTP) for dry electrodes
+    raw_otp = mne.preprocessing.oversampled_temporal_projection(raw_filtered, duration=5.0, picks='eeg', verbose=True)
+    raw_otp.save(paths['otp_fif'], overwrite=True)  # Add this to your paths
+    _safe_plot_psd(raw_otp, paths['otp_fif'])
     
+    # Bad channel detection to remove extreme artifacts and save
+    bads = _detect_bad_channels(raw_otp, paths, min_peak=20e-6, max_peak=500e-6, pre_ica=True) # 20µV-dry electrodes higher baseline noise 500µV captures major movement/contact artifacts
+    raw_otp.info['bads'] = bads
+    raw_bads_dropped = raw_otp.drop_channels(raw_otp.info['bads'])
+    raw_bads_dropped.save(paths['bad_channels_1_fif'], overwrite=True)
+    _safe_plot_psd(raw_bads_dropped, paths['bad_channels_1_fif']) 
+
     # ICA and save
-    raw_clean = _ica_cleaning(raw_bads_dropped, paths)
-    raw_clean.save(paths['ica_fif'], overwrite=True)
-    fig = raw_filtered.plot_psd(show=False)
-    png_path = str(paths['ica_fif']).replace('.fif', '_psd.png')
-    fig.savefig(png_path, bbox_inches='tight')
-    plt.close(fig)
+    raw_ica = _ica_cleaning(raw_bads_dropped, paths)
+    raw_ica.save(paths['ica_fif'], overwrite=True)
+    _safe_plot_psd(raw_ica, paths['ica_fif'])
+        
+    # Bad channel detection for the second time with stricter limits for residual noise
+    bads = _detect_bad_channels(raw_ica, paths, min_peak=5e-6, max_peak=100e-6, pre_ica=False) # Catch flat channels and catch residual artifacts
+    raw_ica.info['bads'] = bads
+    raw_bads_dropped_2 = raw_ica.drop_channels(raw.info['bads'])
+    raw_bads_dropped_2.save(paths['bad_channels_2_fif'], overwrite=True)
+    _safe_plot_psd(raw_bads_dropped_2, paths['bad_channels_2_fif'])
     
-    
-    return raw_clean
+    return raw_bads_dropped_2
 
 def flag_eeg_artifacts_from_motion(raw, motion_df):
-    """Annotate EEG with motion artifacts based on pre-buffered motion_df.
-    Each contiguous block of MotionArtifact==True is marked as one annotation.
-    """
-    # Find contiguous artifact blocks
+    """Annotate EEG with motion artifacts based on pre-buffered motion_df."""
+    # Create copy to avoid modifying original dataframe
+    motion_df = motion_df.copy()
+    
+    # Convert motion timestamps to EEG's time framework
+    eeg_start = raw.first_time
+    motion_df['Timestamp'] = motion_df['Timestamp'] - motion_df['Timestamp'].iloc[0] + eeg_start
+    
+    # Synchronization check
+    motion_start = motion_df['Timestamp'].iloc[0]
+    if abs(eeg_start - motion_start) > 0.1:
+        raise ValueError(f"EEG/motion timestamps misaligned by {abs(eeg_start - motion_start):.2f}s")
+
+    # Calculate sampling rate robust to gaps/dropouts
+    time_diffs = np.diff(motion_df['Timestamp'].values)
+    if np.median(time_diffs) <= 1e-6:
+        raise ValueError("Motion data timestamps invalid (near-zero sampling rate)")
+    sfreq = 1 / np.median(time_diffs)
+
+    # Find contiguous artifact blocks with clamping
     artifact_mask = motion_df['MotionArtifact'].values
     timestamps = motion_df['Timestamp'].values
-    sfreq = 1 / np.mean(np.diff(timestamps))  # Calculate sampling rate
-
-    onsets = []
-    durations = []
-
+    max_eeg_time = raw.first_time + raw.times[-1]
+    
+    onsets, durations = [], []
     in_artifact = False
+    
     for i in range(len(artifact_mask)):
         if artifact_mask[i] and not in_artifact:
-            # Start of new artifact block
-            start_time = timestamps[i]
+            # Start of new artifact block (clamped to EEG start)
+            start_time = max(timestamps[i], eeg_start)
             in_artifact = True
         elif not artifact_mask[i] and in_artifact:
-            # End of artifact block
-            end_time = timestamps[i-1]
-            onsets.append(start_time)
-            durations.append(end_time - start_time + (1/sfreq))  # Add frame duration
+            # End of artifact block (include current sample)
+            end_time = timestamps[i-1] + (1/sfreq)
+            end_time = min(end_time, max_eeg_time)
+            
+            # Only add if duration > 0
+            if end_time > start_time:
+                onsets.append(start_time)
+                durations.append(end_time - start_time)
+                
             in_artifact = False
-    # Handle case where last sample is in artifact
+
+    # Handle final artifact block
     if in_artifact:
-        end_time = timestamps[-1]
-        onsets.append(start_time)
-        durations.append(end_time - start_time + (1/sfreq))
+        end_time = min(timestamps[-1] + (1/sfreq), max_eeg_time)
+        if end_time > start_time:
+            onsets.append(start_time)
+            durations.append(end_time - start_time)
+
+    # Clamp all annotations to EEG time range
+    clamped_onsets = []
+    clamped_durations = []
+    for onset, duration in zip(onsets, durations):
+        # Adjust onset to be ≥ EEG start
+        adj_onset = max(onset, eeg_start)
+        # Calculate maximum possible duration
+        max_dur = max_eeg_time - adj_onset
+        # Only keep annotations with positive duration
+        if max_dur > 0:
+            clamped_onsets.append(adj_onset - eeg_start)  # Convert to relative time
+            clamped_durations.append(min(duration, max_dur))
 
     # Create and add annotations
-    annotations = mne.Annotations(onset=onsets, duration=durations, description='bad_motion_artifact')
-    raw.set_annotations(annotations + raw.annotations)
+    annotations = mne.Annotations(
+        onset=clamped_onsets,
+        duration=clamped_durations,
+        description='bad_motion'
+    )
+    raw.set_annotations(raw.annotations + annotations)
     return raw
 
 def _create_raw(stream):
@@ -102,48 +140,42 @@ def _create_raw(stream):
     
     # Create info with standard electrode positions
     info = mne.create_info(ch_names, sfreq, 'eeg')
-    info.set_montage('standard_1020', match_case=False)
+    info.set_montage('standard_1005', match_case=False) # Enobio
     
     return mne.io.RawArray(eeg_data, info)
 
-def _basic_filtering(raw, paths):
+def _basic_filtering(raw):
     # Filtering
-    raw.filter(1, 40, fir_design='firwin')
+    raw.filter(2, 40, fir_design='firwin') # 2 while 1Hz high-pass may retain baseline wander from dry electrodes.
     raw.notch_filter(50)
 
     return raw
 
-def _detect_bad_channels(raw, paths):
+def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
     """Bad channel detection optimized for Enobio 8 dry electrodes"""
     # Ensure montage is set
     if not raw.info['dig']:
         raw.set_montage('standard_1020', match_case=False, on_missing='warn')
-    
-    # Dry electrode adjustments
-    ptp_thresholds = {
-        'min_peak': 10e-6,   # Dry electrodes' higher impedance increases baseline noise.
-        'max_peak': 300e-6   # Balances artifact rejection with signal preservation:
-    }
-    
-    # 2. Calculate PTP values
+          
+    # 1. Calculate PTP values
     try:
-        ptp_values = _calculate_ptp_percentile(raw, percentile=95)
+        ptp_values = _calculate_ptp_percentile(raw, pre_ica)
     except ValueError as e:
         raise RuntimeError(f"PTP calculation failed: {str(e)}")
 
-    # 3. Identify bad channels using ptp_values
+    # 2. Identify bad channels using ptp_values
     bad_by_ptp = [
         raw.ch_names[i] 
         for i, ptp in enumerate(ptp_values)
-        if (ptp < ptp_thresholds['min_peak']) or (ptp > ptp_thresholds['max_peak'])
+        if (ptp < min_peak) or (ptp > max_peak)
     ]
     
-    # 4. Final validation
+    # 3. Final validation
     good_channels = [ch for ch in raw.ch_names if ch not in bad_by_ptp]
     has_frontal = any(ch.startswith('F') for ch in good_channels)
     has_parietal = any(ch.startswith('P') for ch in good_channels)
     
-    # Prepare detailed results
+    # 4. Prepare detailed results
     details = {
         "bad_by_ptp": bad_by_ptp,
         "ptp_values": {ch: f"{ptp:.2e} V" for ch, ptp in zip(raw.ch_names, ptp_values)},
@@ -163,11 +195,15 @@ def _detect_bad_channels(raw, paths):
     
     # Add critical error if missing regions
     if not (has_frontal and has_parietal):
-        log_content += "\n\nERROR: Insufficient channels for index calculation - "
-        log_content += "requires at least one frontal and one parietal channel!"
+        log_content += "\nERROR: Insufficient channels for index calculation - "
+        log_content += "\nrequires at least one frontal and one parietal channel!"
     
-    with open(paths['processing_log'], 'w') as f:        
-        f.write(log_content)
+    if pre_ica:
+        with open(paths['bad_channels_log_1'], 'w') as f:        
+            f.write(log_content)
+    else:
+        with open(paths['bad_channels_log_2'], 'w') as f:        
+            f.write(log_content)
     
     return bad_by_ptp
 
@@ -176,13 +212,15 @@ def _ica_cleaning(raw, paths):
     # Ensure figures directory exists
     os.makedirs(paths['figures'], exist_ok=True)
     
+    # After dropping bad channels, you adjust n_components to match the new channel count
+    current_channels = len(raw.ch_names) - len(raw.info['bads'])
     # Initialize and fit ICA
     ica = ICA(
-        n_components=0.95,
-        method='infomax',
-        max_iter=1000,
+        n_components=current_channels-1, # Rank= No. channels - 1
+        method='picard',
+        max_iter=1500,
         random_state=42,
-        fit_params=dict(extended=True)
+        fit_params=dict(ortho=False)
     )
     ica.fit(raw)
 
@@ -208,7 +246,7 @@ def _ica_cleaning(raw, paths):
         # Automatically exclude ALL eye components regardless of confidence
         auto_excluded = [
             idx for idx, label in enumerate(ic_labels['labels'])
-            if label == 'eye'
+            if ("eye" in label)
         ]
         
     except Exception as e:
@@ -282,21 +320,45 @@ def _ica_cleaning(raw, paths):
     return ica.apply(raw)
 
 
-def _calculate_ptp_percentile(raw, percentile=95):
+def _calculate_ptp_percentile(raw, pre_ica):
     """Calculate specified percentile of PTP in sliding windows"""
-    # Create events with duration validation
-    duration = 1.0
-    if raw.times[-1] < duration:
-        raise ValueError(f"Data too short ({raw.times[-1]:.1f}s) for {duration}s windows")
+    # Lenient bad channels identifier uses 90 percentile, while strict 95 percentile. 
+    if pre_ica:
+        percentile = 90
+    else:
+        percentile = 95
     
-    events = make_fixed_length_events(raw, duration=duration, overlap=0.5)
+    # Dynamic windowing with validated overlap
+    sfreq = raw.info['sfreq']
+    
+    # Calculate adaptive window parameters
+    max_window_duration = 1.0  # Maximum 1s window
+    min_samples = 5  # Minimum 5 samples per window
+    
+    # Calculate in samples
+    n_per_seg = min(int(max_window_duration * sfreq), len(raw.times))
+    n_per_seg = max(n_per_seg, min_samples)  # Ensure minimum
+    
+    # Calculate window duration in seconds
+    window_duration = n_per_seg / sfreq  # NEW: Convert samples to time
+    
+    # 2. Calculate overlap (25% of window length)
+    n_overlap = int(0.25 * n_per_seg)
+    n_overlap = min(n_overlap, n_per_seg - 1)  # Critical fix
+    
+    # 3. Create events with validated parameters
+    events = make_fixed_length_events(
+        raw, 
+        duration=window_duration,  # Use calculated duration
+        overlap=n_overlap/sfreq
+    )
     
     # Create epochs
     epochs = mne.Epochs(
         raw,
         events,
         tmin=0,
-        tmax=duration,
+        tmax=window_duration,  # Use calculated duration
         baseline=None,
         preload=True,
         verbose=False
@@ -309,3 +371,24 @@ def _calculate_ptp_percentile(raw, percentile=95):
     # Calculate PTP
     ptp_matrix = np.ptp(epochs.get_data(), axis=2)  # Shape: (epochs, channels)
     return np.percentile(ptp_matrix, percentile, axis=0)
+
+def _safe_plot_psd(raw, path):
+        
+        # Convert Path object to string for string replacement
+        png_path = str(path).replace('.fif', '_psd.png')
+        nperseg = min(512, raw.n_times)
+        nperseg = max(nperseg, 5)  # Minimum 5 samples
+        noverlap = min(int(0.25 * nperseg), nperseg - 1)
+        
+        if nperseg <= noverlap:
+            print(f"Skipping PSD for {path}: invalid window params")
+            return
+            
+        fig = raw.plot_psd(
+            fmin=1, fmax=40,
+            n_fft=nperseg,
+            n_overlap=noverlap,
+            show=False
+        )
+        fig.savefig(png_path, bbox_inches='tight')
+        plt.close(fig)

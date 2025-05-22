@@ -1,5 +1,5 @@
 import os
-from main import main
+from main_batch import main
 
 
 def process_directory(input_dir):
