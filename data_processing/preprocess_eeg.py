@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import os
+from scipy import interpolate
 from mne_icalabel import label_components
 from mne import make_fixed_length_events
 from config.paths import get_paths
@@ -69,38 +70,32 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     return raw_bads_dropped_2
 
 def flag_eeg_artifacts_from_motion(raw, motion_df):
-    """Annotate EEG with motion artifacts based on pre-buffered motion_df.
-    Each contiguous block of MotionArtifact==True is marked as one annotation.
-    """
-    # Find contiguous artifact blocks
-    artifact_mask = motion_df['MotionArtifact'].values
-    timestamps = motion_df['Timestamp'].values
-    sfreq = 1 / np.mean(np.diff(timestamps))  # Calculate sampling rate
+    """Annotate EEG with motion artifacts, handling sampling rate disparities."""
+    # Synchronize motion data to EEG timestamps via interpolation
+    artifact_mask = motion_df['MotionArtifact'].values.astype(float)
+    timestamps_motion = motion_df['Timestamp'].values
+    
+    # Interpolate to EEG timeline
+    motion_artifact_interp = interpolate.interp1d(timestamps_motion, artifact_mask, kind='previous', bounds_error=False, fill_value=0.0
+    )(raw.times)
+    artifact_mask_synced = (motion_artifact_interp > 0.5).astype(bool)
 
-    onsets = []
-    durations = []
+    # Find contiguous blocks
+    diff_mask = np.diff(artifact_mask_synced.astype(int), prepend=0, append=0)
+    onsets_indices = np.where(diff_mask == 1)[0]
+    ends_indices = np.where(diff_mask == -1)[0] - 1
 
-    in_artifact = False
-    for i in range(len(artifact_mask)):
-        if artifact_mask[i] and not in_artifact:
-            # Start of new artifact block
-            start_time = timestamps[i]
-            in_artifact = True
-        elif not artifact_mask[i] and in_artifact:
-            # End of artifact block
-            end_time = timestamps[i-1]
-            onsets.append(start_time)
-            durations.append(end_time - start_time + (1/sfreq))  # Add frame duration
-            in_artifact = False
-    # Handle case where last sample is in artifact
-    if in_artifact:
-        end_time = timestamps[-1]
-        onsets.append(start_time)
-        durations.append(end_time - start_time + (1/sfreq))
+    onsets = raw.times[onsets_indices]
+    ends = raw.times[ends_indices]
+    durations = ends - onsets
 
-    # Create and add annotations
+    # Handle empty case
+    if len(onsets) == 0:
+        return raw
+
+    # Create annotations
     annotations = mne.Annotations(onset=onsets, duration=durations, description='bad_motion_artifact')
-    raw.set_annotations(annotations + raw.annotations)
+    raw.set_annotations(raw.annotations + annotations)
     return raw
 
 def _create_raw(stream):

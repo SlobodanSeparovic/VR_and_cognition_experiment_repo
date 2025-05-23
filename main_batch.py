@@ -41,20 +41,10 @@ def main(input_file):
     processed_nasatlx_df = preprocess_behavioral.process_nasatlx(streams['nasatlx'])
     
     # Process VR motion data during task
-    motion_df = preprocess_vr_motion.calculate_kinematics(
-        streams['motion'],
-        task_start,
-        task_end,
-        buffer=0.2
-    )
+    motion_df = preprocess_vr_motion.calculate_kinematics(streams['motion'], task_start, task_end, buffer=0.5)
     
     # Process EEG data (cropped to exact task period)
-    raw_clean = preprocess_eeg.process_eeg(
-        streams['eeg'],
-        input_file,
-        task_start,
-        task_end
-    )
+    raw_clean = preprocess_eeg.process_eeg(streams['eeg'], input_file, task_start, task_end)
     
     # Add motion artifact annotations to EEG    
     raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)

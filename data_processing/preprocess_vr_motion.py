@@ -97,7 +97,7 @@ def _calculate_thresholds(df, percentile=95):
     return thresholds
 
 def _flag_artifacts(df, thresholds, buffer):
-    """Flag artifacts with 200ms buffers, incuding inital buffer handled separately as task was initiated with a trigger"""
+    """Flag artifacts with 500ms buffers, incuding inital buffer handled separately as task was initiated with a trigger"""
     df = df.copy()
     df['MotionArtifact'] = False
     
