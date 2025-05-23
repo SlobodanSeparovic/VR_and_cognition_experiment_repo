@@ -47,13 +47,11 @@ def get_paths(input_file, base_output_dir=None):
     # Add file-specific paths
     base_stem = base_name.replace('.xdf', '')
     paths.update({
-        'subject': subject,
-        'task': task,
-        'raw_fif': Path(paths['raw']) / f'{base_stem}_raw.fif',
-        'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered.fif',
-        'bad_channels_1_fif': Path(paths['bad_channels_1']) / f'{base_stem}_badchansremoved_1.fif',
-        'bad_channels_2_fif': Path(paths['bad_channels_2']) / f'{base_stem}_badchansremoved_2.fif',
-        'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned.fif',
+        'raw_fif': Path(paths['raw']) / f'{base_stem}_eeg.fif',  # raw → eeg
+        'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered_eeg.fif',
+        'bad_channels_1_fif': Path(paths['bad_channels_1']) / f'{base_stem}_badchansremoved1_eeg.fif',
+        'bad_channels_2_fif': Path(paths['bad_channels_2']) / f'{base_stem}_badchansremoved2_eeg.fif',
+        'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned_eeg.fif',
         'bad_channels_1_log': Path(paths['logs']) / f'{base_stem}_bad_channels_1_log.txt',
         'bad_channels_2_log': Path(paths['logs']) / f'{base_stem}_bad_channels_2_log.txt',
         'ica_report': Path(paths['figures']) / f'{base_stem}_ica_report.png',

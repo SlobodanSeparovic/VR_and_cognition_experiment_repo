@@ -110,10 +110,14 @@ def _create_raw(stream):
     return mne.io.RawArray(eeg_data, info)
 
 def _basic_filtering(raw):
-    # Filtering
-    raw.filter(2, 40, fir_design='firwin')
+    # Apply common average reference (CAR) for IClabel
+    raw.set_eeg_reference('average', projection=False)
+    
+    # Bandpass filter for ICLabel compatibility
+    raw.filter(1, 100, fir_design='firwin')
+    
+    # Notch filter
     raw.notch_filter(50)
-
     return raw
 
 def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
@@ -177,9 +181,12 @@ def _ica_cleaning(raw, paths):
     # Ensure figures directory exists
     os.makedirs(paths['figures'], exist_ok=True)
     
+    #Calculate data rank
+    rank = mne.compute_rank(raw, rank='info')['eeg']
+    
     # Initialize and fit ICA
     ica = ICA(
-        n_components=0.999999,
+        n_components=rank,
         method='infomax',
         max_iter=1000,
         random_state=42,
@@ -206,7 +213,7 @@ def _ica_cleaning(raw, paths):
     try:
         ic_labels = label_components(raw, ica, method="iclabel")
         
-        # Automatically exclude ALL eye components regardless of confidence
+        # Automatically exclude ALL non brain components regardless of confidence
         auto_excluded = [
             idx for idx, label in enumerate(ic_labels['labels'])
             if 'brain' not in label
@@ -235,10 +242,12 @@ def _ica_cleaning(raw, paths):
     ax_text = fig.add_subplot(gs[2, :])
     ax_text.axis('off')
 
-    var_explained = ica.get_explained_variance_ratio(
-        raw, 
-        components=[c for c in range(ica.n_components_) if c not in ica.exclude]
-    )['eeg']
+    if ica.exclude:
+        components_kept = [c for c in range(ica.n_components_) if c not in ica.exclude]
+    else:
+        components_kept = list(range(ica.n_components_))
+
+    var_explained = ica.get_explained_variance_ratio(raw, components=components_kept)['eeg']
 
     report_text = [
         "ICA ARTIFACT REJECTION REPORT",
@@ -277,8 +286,6 @@ def _ica_cleaning(raw, paths):
     # Save log
     with open(paths['ica_rejection_log'], 'w') as f:
         f.write("\n".join(report_text))
-        if ica.exclude:
-            f.write("\n\nExclusion rationale: Automatic eye component removal")
 
     return ica.apply(raw)
 
