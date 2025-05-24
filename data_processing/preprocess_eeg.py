@@ -58,7 +58,7 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     plt.close(fig)
 
     # Bad channel detection 2-stricter, deletion and save -remove residual artifacts
-    bads = _detect_bad_channels(raw_ica, paths, min_peak=5e-6, max_peak=150e-6, pre_ica=False)
+    bads = _detect_bad_channels(raw_ica, paths, min_peak=10e-6, max_peak=200-6, pre_ica=False)
     raw_ica.info['bads'] = bads
     raw_bads_dropped_2 = raw_ica.drop_channels(bads)
     raw_bads_dropped_2.save(paths['bad_channels_2_fif'], overwrite=True)
@@ -105,7 +105,7 @@ def _create_raw(stream):
     
     # Create info with standard electrode positions
     info = mne.create_info(ch_names, sfreq, 'eeg')
-    info.set_montage('standard_1020', match_case=False)
+    info.set_montage('standard_1005', match_case=False)
     
     return mne.io.RawArray(eeg_data, info)
 
@@ -124,7 +124,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
     """Bad channel detection optimized for Enobio 8 dry electrodes"""
     # Ensure montage is set
     if not raw.info['dig']:
-        raw.set_montage('standard_1020', match_case=False, on_missing='warn')
+        raw.set_montage('standard_1005', match_case=False, on_missing='warn')
     
     # 2. Calculate PTP values
     try:
@@ -154,6 +154,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
     
     # 5. Build log content
     log_content = (
+        f"{'Pre-ICA Step' if pre_ica else 'Post-ICA Step'}\n"
         "Bad Channel Report\n"
         "---------------------------\n"
         f"- Bad by peak-to-peak amplitude: {details['bad_by_ptp']}\n"
@@ -213,10 +214,11 @@ def _ica_cleaning(raw, paths):
     try:
         ic_labels = label_components(raw, ica, method="iclabel")
         
-        # Automatically exclude ALL non brain components regardless of confidence
+        # Automatically exclude eye, muscle, heart (substring) components and other (substring) if probability for other is greater than 80%
         auto_excluded = [
             idx for idx, label in enumerate(ic_labels['labels'])
-            if 'brain' not in label
+            if any(sub in label.lower() for sub in ['eye', 'muscle', 'heart']) or 
+               ('other' in label.lower() and ic_labels['y_pred_proba'][idx] > 0.8)
         ]
         
     except Exception as e:
