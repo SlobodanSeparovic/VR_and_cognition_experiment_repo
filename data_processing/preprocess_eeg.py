@@ -217,7 +217,7 @@ def _ica_cleaning(raw, paths):
         # Automatically exclude eye, muscle, heart (substring) components and other (substring) if probability for other is greater than 80%
         auto_excluded = [
             idx for idx, label in enumerate(ic_labels['labels'])
-            if any(sub in label.lower() for sub in ['eye', 'muscle', 'heart']) or 
+            if (any(sub in label.lower() for sub in ['eye', 'muscle', 'heart']) and ic_labels['y_pred_proba'][idx] > 0.5) or 
                ('other' in label.lower() and ic_labels['y_pred_proba'][idx] > 0.8)
         ]
         
