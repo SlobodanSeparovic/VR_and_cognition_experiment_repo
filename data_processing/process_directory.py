@@ -13,11 +13,13 @@ def process_directory(root_dir):
             for f in filenames:
                 if f.endswith('.xdf'):
                     full_path = os.path.abspath(os.path.join(dirpath, f))
-                    print(f"Found: {full_path}")  # Debug print
                     xdf_paths.add(full_path)
     
+    # Convert to sorted list
+    sorted_xdf_paths = sorted(xdf_paths)  # Alphabetical order
+    
     # Process collected files
-    for file_path in xdf_paths:
+    for file_path in sorted_xdf_paths:
         try:
             main(file_path)
         except Exception as e:
