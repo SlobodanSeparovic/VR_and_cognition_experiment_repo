@@ -110,8 +110,8 @@ def _create_raw(stream):
     return mne.io.RawArray(eeg_data, info)
 
 def _basic_filtering(raw):
-    # Bandpass filter for project compatibility
-    raw.filter(1, 30, fir_design='firwin')
+    # Bandpass filter for project compatibility (preserve theta, alpha, beta)
+    raw.filter(3, 31, fir_design='firwin')
     
     # Notch filter
     raw.notch_filter(50)
@@ -209,15 +209,14 @@ def _ica_cleaning(raw, paths):
     auto_excluded = []
     ic_labels = None
     try:
-        ic_labels = label_components(raw, ica, method="iclabel")
-        
-        # Automatically exclude eye, muscle, heart (substring) components and other (substring) if probability for other is greater than 80%
+        ic_labels = label_components(raw, ica, method='iclabel')
+    
+        # Automatically exclude eye components
         auto_excluded = [
             idx for idx, label in enumerate(ic_labels['labels'])
-            if (any(sub in label.lower() for sub in ['eye', 'muscle', 'heart']) and ic_labels['y_pred_proba'][idx] > 0.5) or 
-               ('other' in label.lower() and ic_labels['y_pred_proba'][idx] > 0.8)
+            if 'eye' in label.lower()
         ]
-        
+    
     except Exception as e:
         print(f"ICLabel Error: {str(e)} - Continuing without component exclusion")
     
