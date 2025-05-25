@@ -56,6 +56,9 @@ def _process_participant_file(file_path):
     """Process individual participant file and return corrected dataframe"""
     df = pd.read_csv(file_path)
     
+    # Store original column order (without 'V')
+    original_cols = [col for col in df.columns if col != 'V']
+    
     # Split into baseline and task data
     baseline_df = df[df['N'] == 0].copy()
     task_df = df[df['N'] != 0].copy()
@@ -63,15 +66,15 @@ def _process_participant_file(file_path):
     if baseline_df.empty:
         print(f"No baseline data found in {file_path}")
         return pd.DataFrame()
-
-    # Calculate corrected indices
+    
+    # Calculate corrected indexes
     for index in ['CognitiveLoadIndex', 'EngagementIndex']:
         task_df[index + '_corrected'] = task_df.apply(
             lambda row: _calculate_corrected_index(row, baseline_df, index),
             axis=1
         )
     
-    # Drop original indices and rename corrected columns
+    # Drop original indexes and V, rename corrected
     task_df = task_df.drop(columns=['CognitiveLoadIndex', 'EngagementIndex', 'V'])
     task_df = task_df.rename(columns={
         'CognitiveLoadIndex_corrected': 'CognitiveLoadIndex',
@@ -85,10 +88,19 @@ def _process_participant_file(file_path):
         avg_row = env_df.select_dtypes(include=np.number).mean(numeric_only=True)
         avg_row['ParticipantID'] = env_df['ParticipantID'].iloc[0]
         avg_row['Environment'] = env
-        avg_row['N'] = 'Average'
+        avg_row['N'] = 'avg'
         avg_rows.append(avg_row)
     
-    corrected_df = pd.concat([task_df, pd.DataFrame(avg_rows)], ignore_index=True)
+    avg_df = pd.DataFrame(avg_rows)
+    
+    # Reorder columns to match original order
+    corrected_df = pd.concat([task_df, avg_df], ignore_index=True)
+    corrected_df = corrected_df[original_cols]
+    
+    # Map avg to value 10 and sort so avg rows appear within each environment block
+    corrected_df['N_sort'] = corrected_df['N'].apply(lambda x: 10 if x == 'avg' else int(x))
+    corrected_df = corrected_df.sort_values(['Environment', 'N_sort']).drop(columns=['N_sort']).reset_index(drop=True)
+    
     return corrected_df
 
 def _update_final_dataset(final_path, new_data):

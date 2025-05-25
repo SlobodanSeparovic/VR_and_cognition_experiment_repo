@@ -3,31 +3,33 @@ import re
 
 def process_nasatlx(nasatlx_stream):
     """Process NASA-TLX data or return empty scores if missing"""
-    # Define column names
+    # Define column names with NasatlxCli first
     cols = [
-        'NasatlxMental', 'NasatlxPhysical', 'NadatlxTemporal',
-        'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration',
-        'Timestamp', 'NasatlxCli'
+        'NasatlxCli', 'NasatlxMental', 'NasatlxPhysical', 'NasatlxTemporal',
+        'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration', 'Timestamp'
     ]
     
     if nasatlx_stream is None:
-        # Return zero-filled dataframe with correct columns
-        return pd.DataFrame([[0]*6 + [pd.NaT, 0]], columns=cols)
+        return pd.DataFrame([[0] + [0]*6 + [pd.NaT]], columns=cols)
     
     try:
         nasatlx_data = nasatlx_stream['time_series'][0]
         time_stamp = nasatlx_stream['time_stamps'][-1]
     except (KeyError, IndexError):
-        return pd.DataFrame([[0]*6 + [pd.NaT, 0]], columns=cols)
+        return pd.DataFrame([[0] + [0]*6 + [pd.NaT]], columns=cols)
 
-    # Create DataFrame with raw scores
-    df = pd.DataFrame([nasatlx_data], columns=cols[:6])
+    # Create DataFrame for raw scores (excluding NasatlxCli)
+    raw_cols = cols[1:-1]  # all except NasatlxCli and Timestamp
+    df = pd.DataFrame([nasatlx_data], columns=raw_cols)
     
-    # Add metadata and calculate CLI
+    # Calculate NasatlxCli as sum of raw scores
+    df['NasatlxCli'] = df.sum(axis=1)
+    
+    # Add Timestamp column
     df['Timestamp'] = time_stamp
-    df['NasatlxCli'] = df.iloc[:, :6].sum(axis=1)
-     
-    return df[cols]  # Ensure consistent column order
+    
+    # NasatlxCli column first
+    return df[['NasatlxCli'] + raw_cols + ['Timestamp']]
 
 def process_game_performance(stream):
     """Process game data with empty dataframe handling"""
