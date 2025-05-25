@@ -1,11 +1,11 @@
 import mne
 
-def calculate_indices(raw):
+def calculate_indexes(raw):
     """Calculate indices directly from Raw object"""
     frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta = _calculate_band_power(raw)
     return {
-        'cognitive_load': frontal_theta / parietal_alpha,
-        'engagement': global_beta / (global_theta + global_alpha)
+        'CognitiveLoadIndex': frontal_theta / parietal_alpha,
+        'EngagementIndex': global_beta / (global_theta + global_alpha)
     }
 
 def _calculate_band_power(raw):

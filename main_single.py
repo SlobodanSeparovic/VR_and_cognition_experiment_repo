@@ -3,13 +3,14 @@ import configparser
 import os
 import re
 import pandas as pd
+import numpy as np
 from data_processing import (
     read_xdf,
     preprocess_behavioral,
     preprocess_vr_motion,
     preprocess_eeg,
     analyze_eeg,
-    save_participant_data
+    update_participant_data
 )
 
 # Read settings.ini from the repo root
@@ -42,14 +43,25 @@ def main(input_file):
     # Process VR motion data during task
     motion_df = preprocess_vr_motion.calculate_kinematics(streams['motion'], task_start, task_end, buffer=0.25)
     
-    # Process EEG data (cropped to exact task period)
-    raw_clean = preprocess_eeg.process_eeg(streams['eeg'], input_file, task_start, task_end)
-    
-    # Add motion artifact annotations to EEG    
-    raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)
-    
-    # Analyze EEG and get cognitive indices
-    eeg_indexes = analyze_eeg.calculate_indices(raw_clean)
+    # Initialize EEG-related variables with NaN defaults / handle the case when eeg processing fails
+    raw_clean = None
+    eeg_indexes = {
+        'CognitiveLoadIndex': np.nan,
+        'EngagementIndex': np.nan
+    }
+
+    try:
+        # Process EEG data (cropped to exact task period)
+        raw_clean = preprocess_eeg.process_eeg(streams['eeg'], input_file, task_start, task_end)
+        
+        # Add motion artifact annotations to EEG    
+        raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)
+        
+        # Analyze EEG and get cognitive indexes
+        eeg_indexes = analyze_eeg.calculate_indexes(raw_clean)
+        
+    except Exception as e:
+        print(f'EEG processing failed for {participant_id}: {str(e)}')
     
     # Create combined dataframe for saving
     combined_df = pd.concat([
@@ -59,8 +71,8 @@ def main(input_file):
         Environment=processed_game_df['Environment'].iloc[0],
         N=processed_game_df['N'].iloc[0],
         V=processed_game_df['V'].iloc[0],
-        CognitiveLoadIndex=round(eeg_indexes['cognitive_load'], 6),
-        EngagementIndex=round(eeg_indexes['engagement'], 6),
+        CognitiveLoadIndex=round(eeg_indexes['CognitiveLoadIndex'], 6),
+        EngagementIndex=round(eeg_indexes['EngagementIndex'], 6),
         ParticipantID=participant_id
     )
     
@@ -74,21 +86,17 @@ def main(input_file):
     # Reorder the columns
     combined_df = combined_df[cols_order]
 
-    # Save the data
-    save_participant_data.save_participant_data(combined_df, participant_id)
-    
-    # Print results with aligned metrics
-    print(combined_df)
-    print(game_meta)
-    
+    # Update the dataframe with new data and save it 
+    updated_df = update_participant_data.update_participant_data(combined_df, participant_id)   
+        
     return {
         'nasatlx': processed_nasatlx_df,
         'motion': motion_df,
         'eeg': raw_clean,
         'game': processed_game_df,
-        'cumulative' : combined_df
+        'cumulative' : updated_df
     }
 
 if __name__ == "__main__":
-    # Run main with path to input file from congfig file
+    # Run main with path to input file
     main(input_file)

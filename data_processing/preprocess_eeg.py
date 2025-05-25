@@ -110,11 +110,8 @@ def _create_raw(stream):
     return mne.io.RawArray(eeg_data, info)
 
 def _basic_filtering(raw):
-    # Apply common average reference (CAR) for IClabel
-    raw.set_eeg_reference('average', projection=False)
-    
-    # Bandpass filter for ICLabel compatibility
-    raw.filter(1, 100, fir_design='firwin')
+    # Bandpass filter for project compatibility
+    raw.filter(1, 30, fir_design='firwin')
     
     # Notch filter
     raw.notch_filter(50)
