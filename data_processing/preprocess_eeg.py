@@ -58,7 +58,7 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     plt.close(fig)
 
     # Bad channel detection 2-stricter, deletion and save -remove residual artifacts
-    bads = _detect_bad_channels(raw_ica, paths, min_peak=10e-6, max_peak=150-6, pre_ica=False)
+    bads = _detect_bad_channels(raw_ica, paths, min_peak=10e-6, max_peak=100-6, pre_ica=False)
     raw_ica.info['bads'] = bads
     raw_bads_dropped_2 = raw_ica.drop_channels(bads)
     raw_bads_dropped_2.save(paths['bad_channels_2_fif'], overwrite=True)
