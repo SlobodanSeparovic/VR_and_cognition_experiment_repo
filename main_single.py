@@ -29,14 +29,14 @@ def main(input_file):
     
     # Process game data with metadata
     clean_game_df, game_meta = preprocess_behavioral.process_game_performance(streams['game'])
-    
-     #Extract task start and end times
+
+    #Extract task start and end times
     task_start = game_meta['Started']
     task_end = game_meta['Finished']
     
     # Process metrics and handle empty data (control condition)
     processed_game_df = preprocess_behavioral.process_in_game_df(clean_game_df, game_meta)
-    
+
     # Process NASA-TLX with context from cleaned game data
     processed_nasatlx_df = preprocess_behavioral.process_nasatlx(streams['nasatlx'])
     

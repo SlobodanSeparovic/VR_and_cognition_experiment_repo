@@ -41,8 +41,8 @@ def process_game_performance(stream):
     # Extract metadata before filtering
     meta = {
         'Environment': stream['info']['name'][-1],
-        'N': full_df['N'].iloc[-1],
-        'V': full_df['V'].iloc[-1],
+        'N': full_df[full_df['Finished'] == 1.0]['N'].iloc[0],
+        'V': full_df[full_df['Finished'] == 1.0]['V'].iloc[0],
         'Started': full_df[full_df['Started'] == 1.0]['Timestamp'].iloc[0],
         'Finished': full_df[full_df['Finished'] == 1.0]['Timestamp'].iloc[0]
     }
