@@ -121,11 +121,11 @@ def process_in_game_df(clean_df, meta):
         'N': clean_df['N'].iloc[0],
         'V': clean_df['V'].iloc[0],
         'Environment': environment,
-        'F1Score': round(f1, 6),
-        'AvgRtCorrect': round(avg_rt_correct, 6),
-        'AvgRtIncorrect': round(avg_rt_incorrect, 6),
-        'TotalResponses': len(clean_df),
-        'HitRate': round(tp / ACTUAL_POSITIVES, 6)
+        'F1Score': f1,
+        'AvgRtCorrect': avg_rt_correct,
+        'AvgRtIncorrect': avg_rt_incorrect,
+        'TotalResponses': clean_df,
+        'HitRate': (tp / ACTUAL_POSITIVES)
     }]).fillna(0)  # Fill NaN with 0
     
     return result_df
