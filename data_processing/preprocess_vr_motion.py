@@ -86,7 +86,7 @@ def _calc_angular_velocity(df, device):
     df[f'{device}AngularVelocity'] = angular_velocity
     return df
 
-def _calculate_thresholds(df, percentile=95):
+def _calculate_thresholds(df, percentile=99.5):
     thresholds = {}
     devices = ['Hmd', 'Left', 'Right']
     for device in devices:
@@ -97,7 +97,7 @@ def _calculate_thresholds(df, percentile=95):
     return thresholds
 
 def _flag_artifacts(df, thresholds, buffer):
-    """Flag artifacts with 500ms buffers, incuding inital buffer handled separately as task was initiated with a trigger"""
+    """Flag artifacts with buffers, incuding inital buffer handled separately as task was initiated with a trigger"""
     df = df.copy()
     df['MotionArtifact'] = False
     
@@ -107,21 +107,24 @@ def _flag_artifacts(df, thresholds, buffer):
     initial_mask = (df['Timestamp'] >= start_time) & (df['Timestamp'] <= initial_end)
     
     # Motion/trigger artifacts (exclude initial buffer from this logic)
-    other_artifacts = False
+    other_artifacts = pd.Series(False, index=df.index)
     for device in ['Hmd', 'Left', 'Right']:
         lin_mask = df[f'{device}Velocity'] > thresholds[f'{device}_lin']
         ang_mask = df[f'{device}AngularVelocity'] > thresholds[f'{device}_ang']
         other_artifacts |= lin_mask | ang_mask
     
     for side in ['Left', 'Right']:
-        other_artifacts |= df[f'{side}Trigger'] == 1.0
+        trigger_col = df[f'{side}Trigger']
+        trigger_offset = (trigger_col.diff() < -0.5)  # Detect trigger offset (falling edge)
+        other_artifacts |= trigger_offset.fillna(False)
     
     # Apply buffer only to non-initial artifacts
     artifact_times = df[other_artifacts]['Timestamp']
-    buffered_other_artifacts = False
+    buffered_other_artifacts = pd.Series(False, index=df.index)
     for t in artifact_times:
         buffered_other_artifacts |= (df['Timestamp'] >= t - buffer) & (df['Timestamp'] <= t + buffer)
     
     # Combine masks (initial buffer + other buffered artifacts)
     df['MotionArtifact'] = initial_mask | buffered_other_artifacts
+
     return df

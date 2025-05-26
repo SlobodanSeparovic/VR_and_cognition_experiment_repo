@@ -41,7 +41,7 @@ def main(input_file):
     processed_nasatlx_df = preprocess_behavioral.process_nasatlx(streams['nasatlx'])
     
     # Process VR motion data during task
-    motion_df = preprocess_vr_motion.calculate_kinematics(streams['motion'], task_start, task_end, buffer=0.25)
+    motion_df = preprocess_vr_motion.calculate_kinematics(streams['motion'], task_start, task_end, buffer=0.2)
     
     # Initialize EEG-related variables with NaN defaults / handle the case when eeg processing fails
     raw_clean = None
