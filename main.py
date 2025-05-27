@@ -43,14 +43,11 @@ def main_single(input_file):
     processed_nasatlx_df = preprocess_behavioral.process_nasatlx(streams['nasatlx'])
     
     # Process VR motion data during task
-    motion_df = preprocess_vr_motion.calculate_kinematics(streams['motion'], task_start, task_end, buffer=0.2)
+    motion_df = preprocess_vr_motion.calculate_kinematics(streams['motion'], task_start, task_end, buffer=0.4)
     
     # Initialize EEG-related variables with NaN defaults / handle the case when eeg processing fails
     raw_clean = None
-    eeg_indexes = {
-        'CognitiveLoadIndex': np.nan,
-        'EngagementIndex': np.nan
-    }
+    eeg_indexes = {'CognitiveLoadIndex': np.nan, 'EngagementIndex': np.nan}
 
     try:
         # Process EEG data (cropped to exact task period)
@@ -58,7 +55,7 @@ def main_single(input_file):
         
         # Add motion artifact annotations to EEG    
         raw_clean = preprocess_eeg.flag_eeg_artifacts_from_motion(raw_clean, motion_df)
-        
+             
         # Analyze EEG and get cognitive indexes
         eeg_indexes = analyze_eeg.calculate_indexes(raw_clean)
         

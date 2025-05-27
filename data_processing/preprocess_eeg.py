@@ -72,8 +72,8 @@ def flag_eeg_artifacts_from_motion(raw, motion_df):
 
     # Find contiguous blocks
     diff_mask = np.diff(artifact_mask_synced.astype(int), prepend=0, append=0)
-    onsets_indices = np.where(diff_mask == 1)[0]
-    ends_indices = np.where(diff_mask == -1)[0] - 1
+    onsets_indices = np.where(diff_mask > 0.5)[0]
+    ends_indices = np.where(diff_mask < -0.5)[0] - 1
 
     onsets = raw.times[onsets_indices]
     ends = raw.times[ends_indices]

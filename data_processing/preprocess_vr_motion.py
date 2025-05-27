@@ -14,10 +14,10 @@ def calculate_kinematics(stream, start_time, end_time, buffer):
     df['Timestamp'] = stream["time_stamps"]
     
     # Crop to task duration
-    df_cropped = df[
-        (df['Timestamp'] >= start_time) & 
-        (df['Timestamp'] <= end_time)
-    ].copy()
+    df_cropped = df[(df['Timestamp'] >= start_time) & (df['Timestamp'] <= end_time)].copy()
+    
+    # Convert motion timestamps to relative time (like EEG)
+    df_cropped['Timestamp'] = df_cropped['Timestamp'] - df_cropped['Timestamp'].min()
 
     # Calculate velocities (first row will have NaN from buffer pre-task)
     devices = ['Hmd', 'Left', 'Right']
@@ -86,7 +86,7 @@ def _calc_angular_velocity(df, device):
     df[f'{device}AngularVelocity'] = angular_velocity
     return df
 
-def _calculate_thresholds(df, percentile=99.5):
+def _calculate_thresholds(df, percentile=99.9):
     thresholds = {}
     devices = ['Hmd', 'Left', 'Right']
     for device in devices:
@@ -101,11 +101,11 @@ def _flag_artifacts(df, thresholds, buffer):
     df = df.copy()
     df['MotionArtifact'] = False
     
-    # Initial buffer (handled separately as no buffer needs to be added to it later)
+    # Initial assymatric buffer (handled separately as no buffer needs to be added to it later)
     start_time = df['Timestamp'].min()
-    initial_end = start_time + buffer
+    initial_end = start_time + (buffer * 0.75)
     initial_mask = (df['Timestamp'] >= start_time) & (df['Timestamp'] <= initial_end)
-    
+
     # Motion/trigger artifacts (exclude initial buffer from this logic)
     other_artifacts = pd.Series(False, index=df.index)
     for device in ['Hmd', 'Left', 'Right']:
@@ -115,14 +115,18 @@ def _flag_artifacts(df, thresholds, buffer):
     
     for side in ['Left', 'Right']:
         trigger_col = df[f'{side}Trigger']
-        trigger_offset = (trigger_col.diff() < -0.5)  # Detect trigger offset (falling edge)
+        # Detect trigger onsets (button press)
+        trigger_onset = (trigger_col.diff() > 0.5)
+        other_artifacts |= trigger_onset.fillna(False)
+        # Detect trigger offsets (button release)
+        trigger_offset = (trigger_col.diff() < -0.5)
         other_artifacts |= trigger_offset.fillna(False)
     
-    # Apply buffer only to non-initial artifacts
+    # Apply assymetric buffer only to non-initial artifacts
     artifact_times = df[other_artifacts]['Timestamp']
     buffered_other_artifacts = pd.Series(False, index=df.index)
     for t in artifact_times:
-        buffered_other_artifacts |= (df['Timestamp'] >= t - buffer) & (df['Timestamp'] <= t + buffer)
+        buffered_other_artifacts |= (df['Timestamp'] >= t - (buffer * 0.25)) & (df['Timestamp'] <= t + (buffer * 0.75))
     
     # Combine masks (initial buffer + other buffered artifacts)
     df['MotionArtifact'] = initial_mask | buffered_other_artifacts

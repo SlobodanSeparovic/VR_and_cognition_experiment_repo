@@ -25,11 +25,20 @@ def update_participant_data(df, participant_id):
             df['N'].astype(str)
         )
         
-        # Remove existing entries that match new data's keys
+        # Remove existing entries that match new data's keys and drop them and handle empty columns
         existing_clean = existing_df[~existing_df['_key'].isin(df['_key'])].drop(columns=['_key'])
+        empty_cols_existing = existing_clean.columns[existing_clean.isna().all()].tolist()  # Identify empty columns
+        existing_clean = existing_clean.drop(columns=empty_cols_existing)
         
-        # Combine cleaned existing data with new data (new entries overwrite old ones)
-        updated_df = pd.concat([existing_clean, df.drop(columns=['_key'])], ignore_index=True)
+        
+        # Remove '_key' and empty columns from the new DataFrame (new entries overwrite old ones)
+        clean_df = df.drop(columns=['_key'])
+        empty_cols_clean = clean_df.columns[clean_df.isna().all()].tolist()  # Identify empty columns
+        clean_df = clean_df.drop(columns=empty_cols_clean)
+
+        # Concatenate cleaned existing data with new data
+        updated_df = pd.concat([existing_clean, clean_df], ignore_index=True)  
+              
     else:
         updated_df = df.drop(columns=['_key'], errors='ignore')
     

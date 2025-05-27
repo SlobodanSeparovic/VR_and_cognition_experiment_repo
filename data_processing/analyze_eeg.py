@@ -32,23 +32,14 @@ def _calculate_band_power(raw):
         raise ValueError(
             f"Cannot calculate band power - missing {', '.join(missing_regions)} channels. "
             "Participant data cannot be used for the experiment."
-        )
-
-    # Get sampling rate
-    sampling_rate = int(raw.info['sfreq'])
-    print('sampl rate:', sampling_rate)
-    
-    # Setup for correct binning of theta, alpha and beta
-    n_fft = sampling_rate  # FFT length (samples)
-    n_per_seg = n_fft  # Segment length (samples)
-    n_overlap = int(0.75 * n_per_seg)  # 75% overlap
+        )     
         
     # Calculate power spectra while rejecting the motion artifact periods
-    psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=4, fmax=7.999, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
-    psd_parietal_alpha = raw.copy().pick(parietal_chs).compute_psd(fmin=8, fmax=12.999, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
-    psd_global_theta = raw.copy().pick(available_channels).compute_psd(fmin=4, fmax=7.999, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
-    psd_global_alpha = raw.copy().pick(available_channels).compute_psd(fmin=8, fmax=12.999, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
-    psd_global_beta = raw.copy().pick(available_channels).compute_psd(fmin=13, fmax=30.999, method='welch', n_fft=n_fft, n_per_seg=n_per_seg, n_overlap=n_overlap, reject_by_annotation=True)
+    psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=5, fmax=7, method='welch', reject_by_annotation=True)
+    psd_parietal_alpha = raw.copy().pick(parietal_chs).compute_psd(fmin=8, fmax=13, method='welch', reject_by_annotation=True)
+    psd_global_theta = raw.copy().pick(available_channels).compute_psd(fmin=5, fmax=7, method='welch', reject_by_annotation=True)
+    psd_global_alpha = raw.copy().pick(available_channels).compute_psd(fmin=8, fmax=13, method='welch', reject_by_annotation=True)
+    psd_global_beta = raw.copy().pick(available_channels).compute_psd(fmin=14, fmax=30, method='welch', reject_by_annotation=True)
       
     # Calculate mean absolute power
     frontal_theta = psd_frontal_theta.get_data().mean(axis=0).mean()
@@ -58,3 +49,5 @@ def _calculate_band_power(raw):
     global_beta = psd_global_beta.get_data().mean(axis=0).mean()
 
     return frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta
+
+
