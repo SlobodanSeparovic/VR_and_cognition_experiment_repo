@@ -1,14 +1,14 @@
 import os
 import re
 from pathlib import Path
-from main_single import main
+from main import main_single
 
-def process_directory(root_dir):
-    """Process all XDF files in BIDS-style directory"""
+def process_directory(directory):
+    """Process all XDF files in the directory"""
     # Collect all XDF files
     xdf_paths = set()
     
-    for dirpath, _, filenames in os.walk(root_dir):
+    for dirpath, _, filenames in os.walk(directory):
         if re.search(r'sub-[^/\\]+[/\\]ses-S001[/\\]eeg$', dirpath.replace('\\', '/')):
             for f in filenames:
                 if f.endswith('.xdf'):
@@ -21,6 +21,6 @@ def process_directory(root_dir):
     # Process collected files
     for file_path in sorted_xdf_paths:
         try:
-            main(file_path)
+            main_single(file_path)
         except Exception as e:
             print(f"Error processing {file_path}: {str(e)}")

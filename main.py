@@ -10,7 +10,8 @@ from data_processing import (
     preprocess_vr_motion,
     preprocess_eeg,
     analyze_eeg,
-    update_participant_data
+    update_participant_data,
+    process_directory
 )
 
 # Read settings.ini from the repo root
@@ -19,8 +20,9 @@ config = configparser.ConfigParser()
 config_path = os.path.join(os.path.dirname(__file__), "settings.ini")
 config.read(config_path)
 input_file = config['INPUT']['input_file']
+mode = int(config['INPUT'].get('mode', '1'))  # Default to single file mode
 
-def main(input_file):       
+def main_single(input_file):       
     # Read and align all data streams
     streams = read_xdf.load_xdf(input_file)
     
@@ -96,7 +98,25 @@ def main(input_file):
         'game': processed_game_df,
         'cumulative' : updated_df
     }
+    
+def main():
+    # Choose the mode based on settings input 
+    if mode == 1:  # Single file mode
+        print(f"Running single file processing for {input_file}")
+        return main_single(input_file)
+        
+    elif mode == 2:  # Participant directory mode
+        # Get the directory two levels up from the file (which is 'experiment')        
+        participant_dir = os.path.abspath(os.path.join(os.path.dirname(input_file), '../..'))
+        print(f"Processing all files for participant: {participant_dir}")
+        process_directory.process_directory(participant_dir)
+        
+    elif mode == 3:  # Whole experiment mode
+        # Get the directory three levels up from the file (which is 'experiment')
+        experiment_dir = os.path.abspath(os.path.join(os.path.dirname(input_file), '../../..'))
+        print(f"Processing entire experiment dataset: {experiment_dir}")
+        process_directory.process_directory(experiment_dir)
 
 if __name__ == "__main__":
-    # Run main with path to input file
-    main(input_file)
+    # Run main
+    main()
