@@ -101,7 +101,7 @@ def _create_raw(stream):
 
 def _basic_filtering(raw):
     # Bandpass filter for project compatibility (preserve theta, alpha, beta)
-    raw.filter(2, 31, fir_design='firwin')
+    raw.filter(4, 30, fir_design='firwin')
     
     # Notch filter
     raw.notch_filter(50)
@@ -156,7 +156,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak):
     return bad_by_ptp
 
 def _ica_cleaning(raw, paths):
-    """Perform automated ICA artifact rejection for eye blinks."""
+    """Perform automated ICA artifact rejection for everything but brain and other."""
     # Ensure figures directory exists
     os.makedirs(paths['ica_components'], exist_ok=True)
     
@@ -164,13 +164,7 @@ def _ica_cleaning(raw, paths):
     rank = mne.compute_rank(raw, rank='info')['eeg']
     
     # Initialize and fit ICA
-    ica = ICA(
-        n_components=rank,
-        method='infomax',
-        max_iter=1000,
-        random_state=42,
-        fit_params=dict(extended=True)
-    )
+    ica = ICA(n_components=rank, method='infomax', max_iter=1000, random_state=42, fit_params=dict(extended=True))
     ica.fit(raw)
 
     # Set individual components directory
@@ -189,11 +183,8 @@ def _ica_cleaning(raw, paths):
     try:
         ic_labels = label_components(raw, ica, method='iclabel')
     
-        # Automatically exclude eye components
-        auto_excluded = [
-            idx for idx, label in enumerate(ic_labels['labels'])
-            if 'eye' in label.lower()
-        ]
+        # Automatically exclude components not having brain or other in their label
+        auto_excluded = [idx for idx, label in enumerate(ic_labels['labels']) if label.lower() not in ("brain", "other")]
     
     except Exception as e:
         print(f"ICLabel Error: {str(e)} - Continuing without component exclusion")

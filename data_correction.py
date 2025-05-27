@@ -40,20 +40,7 @@ def process_all_participants(results_dir='results'):
         print("No participant data found for processing")
 
 
-def _calculate_corrected_index(row, baseline_df, index_name):
-    """Calculate corrected index value using baseline"""
-    try:
-        baseline = baseline_df.loc[
-            (baseline_df['Environment'] == row['Environment']) &
-            (baseline_df['ParticipantID'] == row['ParticipantID']),
-            index_name
-        ].values[0]
-        return row[index_name] / baseline if not np.isnan(baseline) and baseline != 0 else np.nan
-    except (IndexError, KeyError):
-        return np.nan
-
 def _process_participant_file(file_path):
-    """Process individual participant file and return corrected dataframe"""
     df = pd.read_csv(file_path)
     
     # Store original column order (without 'V')
@@ -80,28 +67,27 @@ def _process_participant_file(file_path):
         'CognitiveLoadIndex_corrected': 'CognitiveLoadIndex',
         'EngagementIndex_corrected': 'EngagementIndex'
     })
-    
-    # Add average rows per environment
-    avg_rows = []
-    for env in task_df['Environment'].unique():
-        env_df = task_df[task_df['Environment'] == env]
-        avg_row = env_df.select_dtypes(include=np.number).mean(numeric_only=True)
-        avg_row['ParticipantID'] = env_df['ParticipantID'].iloc[0]
-        avg_row['Environment'] = env
-        avg_row['N'] = 'avg'
-        avg_rows.append(avg_row)
-    
-    avg_df = pd.DataFrame(avg_rows)
-    
+
     # Reorder columns to match original order
-    corrected_df = pd.concat([task_df, avg_df], ignore_index=True)
-    corrected_df = corrected_df[original_cols]
+    corrected_df = task_df[original_cols]
     
-    # Map avg to value 10 and sort so avg rows appear within each environment block
-    corrected_df['N_sort'] = corrected_df['N'].apply(lambda x: 10 if x == 'avg' else int(x))
+    # Sort by Environment and N
+    corrected_df['N_sort'] = corrected_df['N'].astype(int)
     corrected_df = corrected_df.sort_values(['Environment', 'N_sort']).drop(columns=['N_sort']).reset_index(drop=True)
     
     return corrected_df
+
+def _calculate_corrected_index(row, baseline_df, index_name):
+    """Calculate corrected index value using baseline"""
+    try:
+        baseline = baseline_df.loc[
+            (baseline_df['Environment'] == row['Environment']) &
+            (baseline_df['ParticipantID'] == row['ParticipantID']),
+            index_name
+        ].values[0]
+        return (row[index_name] - baseline) / baseline if not np.isnan(baseline) and baseline != 0 else np.nan
+    except (IndexError, KeyError):
+        return np.nan
 
 def _update_final_dataset(final_path, new_data):
     """Update final aggregated dataset with new data"""

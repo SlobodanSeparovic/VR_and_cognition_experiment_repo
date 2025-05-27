@@ -9,9 +9,8 @@ def calculate_indexes(raw):
     }
 
 def _calculate_band_power(raw):
-    """Calculate frontal theta (4-7Hz), parietal alpha (8-12Hz), and global beta (13-30Hz) power.
-    Raises ValueError if required channels are missing.
-    Calculate band power while excluding annotated artifact periods."""
+    """Calculate band power while excluding annotated artifact periods.
+    Raises ValueError if required channels are missing."""
     
     # Define target channels
     frontal_channels = ['AF3', 'AF4', 'F3', 'Fz', 'F4']
@@ -49,5 +48,3 @@ def _calculate_band_power(raw):
     global_beta = psd_global_beta.get_data().mean(axis=0).mean()
 
     return frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta
-
-
