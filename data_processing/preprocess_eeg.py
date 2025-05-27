@@ -39,13 +39,13 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     fig.savefig(png_path, bbox_inches='tight')
     plt.close(fig)
     
-    # Bad channel detection 1, looser, deletion and save-remove severe artifacts
-    bads = _detect_bad_channels(raw_filtered, paths, min_peak=10e-6, max_peak=100e-6, pre_ica=True)
+    # Bad channel detection
+    bads = _detect_bad_channels(raw_filtered, paths, min_peak=10e-6, max_peak=100e-6)
     raw_filtered.info['bads'] = bads
     raw_bads_dropped = raw_filtered.drop_channels(bads)
-    raw_bads_dropped.save(paths['bad_channels_1_fif'], overwrite=True)
+    raw_bads_dropped.save(paths['bad_channels_fif'], overwrite=True)
     fig = raw_bads_dropped.compute_psd().plot(show=False) 
-    png_path = str(paths['bad_channels_1_fif']).replace('.fif', '_psd.png')
+    png_path = str(paths['bad_channels_fif']).replace('.fif', '_psd.png')
     fig.savefig(png_path, bbox_inches='tight')
     plt.close(fig)
     
@@ -56,18 +56,8 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     png_path = str(paths['ica_fif']).replace('.fif', '_psd.png')
     fig.savefig(png_path, bbox_inches='tight')
     plt.close(fig)
-
-    # Bad channel detection 2-stricter, deletion and save -remove residual artifacts
-    bads = _detect_bad_channels(raw_ica, paths, min_peak=10e-6, max_peak=100-6, pre_ica=False)
-    raw_ica.info['bads'] = bads
-    raw_bads_dropped_2 = raw_ica.drop_channels(bads)
-    raw_bads_dropped_2.save(paths['bad_channels_2_fif'], overwrite=True)
-    fig = raw_bads_dropped_2.compute_psd().plot(show=False)
-    png_path = str(paths['bad_channels_2_fif']).replace('.fif', '_psd.png')
-    fig.savefig(png_path, bbox_inches='tight')
-    plt.close(fig)
     
-    return raw_bads_dropped_2
+    return raw_ica
 
 def flag_eeg_artifacts_from_motion(raw, motion_df):
     """Annotate EEG with motion artifacts, handling sampling rate disparities."""
@@ -117,7 +107,7 @@ def _basic_filtering(raw):
     raw.notch_filter(50)
     return raw
 
-def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
+def _detect_bad_channels(raw, paths, min_peak, max_peak):
     """Bad channel detection"""       
     # Calculate PTP values
     try:
@@ -147,8 +137,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
     
     # Build log content
     log_content = (
-        f"{'Pre-ICA Step' if pre_ica else 'Post-ICA Step'}\n"
-        "Bad Channel Report\n"
+        f"Bad Channels Report\n"
         "---------------------------\n"
         f"- Bad by peak-to-peak amplitude: {details['bad_by_ptp']}\n"
         f"- Frontal channels remaining: {has_frontal}\n"
@@ -161,19 +150,15 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
         log_content += "\n\nERROR: Insufficient channels for index calculation - "
         log_content += "requires at least one frontal and one parietal channel!"
     
-    if pre_ica:
-        with open(paths['bad_channels_1_log'], 'w') as f:        
-            f.write(log_content)
-    else:
-        with open(paths['bad_channels_2_log'], 'w') as f:        
-            f.write(log_content)
-    
+    with open(paths['bad_channels_log'], 'w') as f:        
+        f.write(log_content)
+        
     return bad_by_ptp
 
 def _ica_cleaning(raw, paths):
     """Perform automated ICA artifact rejection for eye blinks."""
     # Ensure figures directory exists
-    os.makedirs(paths['figures'], exist_ok=True)
+    os.makedirs(paths['ica_components'], exist_ok=True)
     
     #Calculate data rank
     rank = mne.compute_rank(raw, rank='info')['eeg']
@@ -188,18 +173,15 @@ def _ica_cleaning(raw, paths):
     )
     ica.fit(raw)
 
-    # Create component plots directory
-    components_dir = os.path.join(paths['figures'], 'ica_components')
-    os.makedirs(components_dir, exist_ok=True)
+    # Set individual components directory
+    components_dir = paths['ica_components']
 
     # Generate and save individual component plots
-    print("\nGenerating component detail plots...")
     for comp in range(ica.n_components_):
         fig_comp = ica.plot_properties(raw, picks=comp, show=False)
         fig_comp[0].savefig(os.path.join(components_dir, f'component_{comp:02d}.png'),
                             bbox_inches='tight')
         plt.close(fig_comp[0])
-    print("Component details saved to:", components_dir)
 
     # Automated Exclusion---------------
     auto_excluded = []
@@ -273,7 +255,7 @@ def _ica_cleaning(raw, paths):
     )
 
     # Save and close
-    save_path = os.path.join(paths['figures'], 'ica_report.png')
+    save_path = os.path.join(paths['logs'], 'ica_report.png')
     fig.savefig(save_path, bbox_inches='tight')
     plt.close(fig)
 

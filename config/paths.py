@@ -30,10 +30,9 @@ def get_paths(input_file, base_output_dir=None):
         'root': Path(base_output_dir) / subject / task,
         'raw': '00_raw',
         'filtered': '01_filtered',
-        'bad_channels_1': '02_bad_channels_1',
+        'bad_channels': '02_bad_channels',
         'ica': '03_ica_cleaned',
-        'bad_channels_2': '02_bad_channels_2',
-        'figures': 'reports/figures',
+        'ica_components': 'reports/ica_components',
         'logs': 'reports/logs'
     }
 
@@ -49,12 +48,10 @@ def get_paths(input_file, base_output_dir=None):
     paths.update({
         'raw_fif': Path(paths['raw']) / f'{base_stem}_eeg.fif',  # raw → eeg
         'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered_eeg.fif',
-        'bad_channels_1_fif': Path(paths['bad_channels_1']) / f'{base_stem}_badchansremoved1_eeg.fif',
-        'bad_channels_2_fif': Path(paths['bad_channels_2']) / f'{base_stem}_badchansremoved2_eeg.fif',
+        'bad_channels_fif': Path(paths['bad_channels']) / f'{base_stem}_badchansremoved_eeg.fif',
         'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned_eeg.fif',
-        'bad_channels_1_log': Path(paths['logs']) / f'{base_stem}_bad_channels_1_log.txt',
-        'bad_channels_2_log': Path(paths['logs']) / f'{base_stem}_bad_channels_2_log.txt',
-        'ica_report': Path(paths['figures']) / f'{base_stem}_ica_report.png',
+        'bad_channels_log': Path(paths['logs']) / f'{base_stem}_bad_channels_log.txt',
+        'ica_report': Path(paths['logs']) / f'{base_stem}_ica_report.png',
         'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt'
     })
 
