@@ -118,25 +118,21 @@ def _basic_filtering(raw):
     return raw
 
 def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
-    """Bad channel detection optimized for Enobio 8 dry electrodes"""
-    # Ensure montage is set
-    if not raw.info['dig']:
-        raw.set_montage('standard_1005', match_case=False, on_missing='warn')
-    
-    # 2. Calculate PTP values
+    """Bad channel detection"""       
+    # Calculate PTP values
     try:
         ptp_values = _calculate_ptp_percentile(raw, percentile=95)
     except ValueError as e:
         raise RuntimeError(f"PTP calculation failed: {str(e)}")
 
-    # 3. Identify bad channels using ptp_values
+    # Identify bad channels using ptp_values
     bad_by_ptp = [
         raw.ch_names[i] 
         for i, ptp in enumerate(ptp_values)
         if (ptp < min_peak) or (ptp > max_peak)
     ]
     
-    # 4. Final validation
+    # Final validation
     good_channels = [ch for ch in raw.ch_names if ch not in bad_by_ptp]
     has_frontal = any(ch.startswith('F') for ch in good_channels)
     has_parietal = any(ch.startswith('P') for ch in good_channels)
@@ -149,7 +145,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
         "parietal_remaining": has_parietal
     }
     
-    # 5. Build log content
+    # Build log content
     log_content = (
         f"{'Pre-ICA Step' if pre_ica else 'Post-ICA Step'}\n"
         "Bad Channel Report\n"
