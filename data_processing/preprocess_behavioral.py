@@ -124,7 +124,7 @@ def process_in_game_df(clean_df, meta):
         'F1Score': f1,
         'AvgRtCorrect': avg_rt_correct,
         'AvgRtIncorrect': avg_rt_incorrect,
-        'TotalResponses': clean_df,
+        'TotalResponses': len(clean_df),
         'HitRate': (tp / ACTUAL_POSITIVES)
     }]).fillna(0)  # Fill NaN with 0
     
