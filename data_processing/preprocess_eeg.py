@@ -137,7 +137,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak):
     
     # Build log content
     log_content = (
-        f"Bad Channels Report\n"
+        f"BAD CHANNELS REPORT\n"
         "---------------------------\n"
         f"- Bad by peak-to-peak amplitude: {details['bad_by_ptp']}\n"
         f"- Frontal channels remaining: {has_frontal}\n"
