@@ -40,7 +40,7 @@ def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=No
     plt.close(fig)
     
     # Bad channel detection 1, looser, deletion and save-remove severe artifacts
-    bads = _detect_bad_channels(raw_filtered, paths, min_peak=10e-6, max_peak=100e-6, pre_ica=True)
+    bads = _detect_bad_channels(raw_filtered, paths, min_peak=20e-6, max_peak=200e-6, pre_ica=True)
     raw_filtered.info['bads'] = bads
     raw_bads_dropped = raw_filtered.drop_channels(bads)
     raw_bads_dropped.save(paths['bad_channels_1_fif'], overwrite=True)
@@ -147,8 +147,8 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
     
     # Build log content
     log_content = (
-        f"{'Pre-ICA Step' if pre_ica else 'Post-ICA Step'}\n"
-        "Bad Channel Report\n"
+        f"{'PRE-ICA STEP' if pre_ica else 'POST-ICA STEP'}\n"
+        "BAD CHANNELS REPORT\n"
         "---------------------------\n"
         f"- Bad by peak-to-peak amplitude: {details['bad_by_ptp']}\n"
         f"- Frontal channels remaining: {has_frontal}\n"
@@ -172,9 +172,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak, pre_ica):
 
 def _ica_cleaning(raw, paths):
     """Perform automated ICA artifact rejection for eye blinks."""
-    # Ensure figures directory exists
-    os.makedirs(paths['figures'], exist_ok=True)
-    
+        
     #Calculate data rank
     rank = mne.compute_rank(raw, rank='info')['eeg']
     
@@ -188,9 +186,8 @@ def _ica_cleaning(raw, paths):
     )
     ica.fit(raw)
 
-    # Create component plots directory
-    components_dir = os.path.join(paths['figures'], 'ica_components')
-    os.makedirs(components_dir, exist_ok=True)
+    # Assign component plots directory
+    components_dir = paths['ica_components']
 
     # Generate and save individual component plots
     print("\nGenerating component detail plots...")
@@ -273,7 +270,7 @@ def _ica_cleaning(raw, paths):
     )
 
     # Save and close
-    save_path = os.path.join(paths['figures'], 'ica_report.png')
+    save_path = os.path.join(paths['logs'], 'ica_report.png')
     fig.savefig(save_path, bbox_inches='tight')
     plt.close(fig)
 

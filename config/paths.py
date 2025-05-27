@@ -33,7 +33,7 @@ def get_paths(input_file, base_output_dir=None):
         'bad_channels_1': '02_bad_channels_1',
         'ica': '03_ica_cleaned',
         'bad_channels_2': '02_bad_channels_2',
-        'figures': 'reports/figures',
+        'ica_components': 'reports/ica_components',
         'logs': 'reports/logs'
     }
 
@@ -54,7 +54,7 @@ def get_paths(input_file, base_output_dir=None):
         'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned_eeg.fif',
         'bad_channels_1_log': Path(paths['logs']) / f'{base_stem}_bad_channels_1_log.txt',
         'bad_channels_2_log': Path(paths['logs']) / f'{base_stem}_bad_channels_2_log.txt',
-        'ica_report': Path(paths['figures']) / f'{base_stem}_ica_report.png',
+        'ica_report': Path(paths['logs']) / f'{base_stem}_ica_report.png',
         'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt'
     })
 
