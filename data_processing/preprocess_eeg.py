@@ -111,7 +111,7 @@ def _create_raw(stream):
 
 def _basic_filtering(raw):
     # Bandpass filter for project compatibility (preserve theta, alpha, beta)
-    raw.filter(3, 31, fir_design='firwin')
+    raw.filter(2, 31, fir_design='firwin')
     
     # Notch filter
     raw.notch_filter(50)
