@@ -67,19 +67,21 @@ def main_single(input_file):
         processed_game_df.drop(columns=['Environment', 'N', 'V']),
         processed_nasatlx_df.drop(columns=['Timestamp'])
         ], axis=1).assign(
-        Environment=processed_game_df['Environment'].iloc[0],
+        Env=processed_game_df['Environment'].iloc[0],
         N=processed_game_df['N'].iloc[0],
         V=processed_game_df['V'].iloc[0],
-        CognitiveLoadIndex=round(eeg_indexes['CognitiveLoadIndex'], 6),
-        EngagementIndex=round(eeg_indexes['EngagementIndex'], 6),
-        ParticipantID=participant_id
+        FTCLI = eeg_indexes['FTCLI'],
+        FTPACLI = eeg_indexes['FTPACLI'],
+        EngI = eeg_indexes['EngI'],
+        MotionArt = eeg_indexes['ArtRatio'],
+        Subject=participant_id
     )
     
     # Define the column order
     cols_order = [
-        'ParticipantID', 'Environment', 'N', 'V', 'CognitiveLoadIndex', 'EngagementIndex'
+        'Subject', 'Env', 'N', 'V', 'FTCLI', 'FTPACLI', 'EngI'
     ] + [col for col in combined_df.columns if col not in [
-        'ParticipantID', 'Environment', 'N', 'V', 'CognitiveLoadIndex', 'EngagementIndex'
+        'Subject', 'Env', 'N', 'V', 'FTCLI', 'FTPACLI', 'EngI'
     ]]
     
     # Reorder the columns

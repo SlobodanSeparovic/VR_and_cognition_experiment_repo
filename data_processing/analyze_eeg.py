@@ -1,11 +1,13 @@
 import mne
 
 def calculate_indexes(raw):
-    """Calculate indices directly from Raw object"""
-    frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta = _calculate_band_power(raw)
+    """Calculate indexes and artifact ratio for reporting"""
+    frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta, artifact_ratio = _calculate_band_power(raw)
     return {
-        'CognitiveLoadIndex': frontal_theta / parietal_alpha,
-        'EngagementIndex': global_beta / (global_theta + global_alpha)
+        'FTCLI': frontal_theta,
+        'FTPACLI': frontal_theta / parietal_alpha,
+        'EngI': global_beta / (global_theta + global_alpha),
+        'ArtRatio' : artifact_ratio
     }
 
 def _calculate_band_power(raw):
@@ -33,8 +35,12 @@ def _calculate_band_power(raw):
             "Participant data cannot be used for the experiment."
         )
     
-    # get frequency for proper binning of the data     
+    # Get frequency for proper binning of the data and ratio of data flagged as bad
     sfreq = int(raw.info['sfreq'])
+    
+    # Calculate artifact percentage    
+    bad_samples = sum(int(ann['duration'] * sfreq) for ann in raw.annotations if ann['description'] == 'bad_motion_artifact')
+    artifact_ratio = (bad_samples / raw.n_times) if raw.n_times > 0 else 0.0
         
     # Calculate power spectra while rejecting the motion artifact periods
     psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=4, fmax=7, n_fft= sfreq, method='welch', reject_by_annotation=True)
@@ -62,4 +68,4 @@ def _calculate_band_power(raw):
     global_alpha = psd_global_alpha.get_data().mean(axis=0).mean()
     global_beta = psd_global_beta.get_data().mean(axis=0).mean()
 
-    return frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta
+    return frontal_theta, parietal_alpha, global_theta, global_alpha, global_beta, artifact_ratio

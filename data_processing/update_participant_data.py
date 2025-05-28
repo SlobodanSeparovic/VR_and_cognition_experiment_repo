@@ -14,14 +14,14 @@ def update_participant_data(df, participant_id):
         
         # Create composite keys for duplicate checking
         existing_df['_key'] = (
-            existing_df['ParticipantID'].astype(str) + '|' +
-            existing_df['Environment'].astype(str) + '|' +
+            existing_df['Subject'].astype(str) + '|' +
+            existing_df['Env'].astype(str) + '|' +
             existing_df['N'].astype(str)
         )
         
         df['_key'] = (
-            df['ParticipantID'].astype(str) + '|' +
-            df['Environment'].astype(str) + '|' +
+            df['Subject'].astype(str) + '|' +
+            df['Env'].astype(str) + '|' +
             df['N'].astype(str)
         )
         

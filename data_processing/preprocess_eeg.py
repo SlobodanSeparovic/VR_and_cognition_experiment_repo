@@ -66,8 +66,7 @@ def flag_eeg_artifacts_from_motion(raw, motion_df):
     timestamps_motion = motion_df['Timestamp'].values
     
     # Interpolate to EEG timeline
-    motion_artifact_interp = interpolate.interp1d(timestamps_motion, artifact_mask, kind='previous', bounds_error=False, fill_value=0.0
-    )(raw.times)
+    motion_artifact_interp = interpolate.interp1d(timestamps_motion, artifact_mask, kind='previous', bounds_error=False, fill_value=0.0)(raw.times)
     artifact_mask_synced = (motion_artifact_interp > 0.5).astype(bool)
 
     # Find contiguous blocks
