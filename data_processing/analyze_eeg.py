@@ -31,14 +31,29 @@ def _calculate_band_power(raw):
         raise ValueError(
             f"Cannot calculate band power - missing {', '.join(missing_regions)} channels. "
             "Participant data cannot be used for the experiment."
-        )     
+        )
+    
+    # get frequency for proper binning of the data     
+    sfreq = int(raw.info['sfreq'])
         
     # Calculate power spectra while rejecting the motion artifact periods
-    psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=5, fmax=7, method='welch', reject_by_annotation=True)
-    psd_parietal_alpha = raw.copy().pick(parietal_chs).compute_psd(fmin=8, fmax=13, method='welch', reject_by_annotation=True)
-    psd_global_theta = raw.copy().pick(available_channels).compute_psd(fmin=5, fmax=7, method='welch', reject_by_annotation=True)
-    psd_global_alpha = raw.copy().pick(available_channels).compute_psd(fmin=8, fmax=13, method='welch', reject_by_annotation=True)
-    psd_global_beta = raw.copy().pick(available_channels).compute_psd(fmin=14, fmax=30, method='welch', reject_by_annotation=True)
+    psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=4, fmax=7, n_fft= sfreq, method='welch', reject_by_annotation=True)
+    psd_parietal_alpha = raw.copy().pick(parietal_chs).compute_psd(fmin=8, fmax=13, n_fft=sfreq, method='welch', reject_by_annotation=True)
+    psd_global_theta = raw.copy().pick(available_channels).compute_psd(fmin=4, fmax=7, n_fft=sfreq, method='welch', reject_by_annotation=True)
+    psd_global_alpha = raw.copy().pick(available_channels).compute_psd(fmin=8, fmax=13, n_fft=sfreq, method='welch', reject_by_annotation=True)
+    psd_global_beta = raw.copy().pick(available_channels).compute_psd(fmin=14, fmax=30, n_fft=sfreq, method='welch', reject_by_annotation=True)
+    
+    # Check bin frequencies:
+    # For frontal theta (4-7 Hz)
+    print("Frontal theta bin frequencies:", psd_frontal_theta.freqs)
+    # For parietal alpha (8-13 Hz) 
+    print("Parietal alpha bin frequencies:", psd_parietal_alpha.freqs)    
+    # For global theta (5-7 Hz)
+    print("Global theta bin frequencies:", psd_global_theta.freqs)
+    # For global alpha (8-13 Hz) 
+    print("Parietal alpha bin frequencies:", psd_global_alpha.freqs)    
+    # For global beta (14-30 Hz) 
+    print("Beta bin frequencies:", psd_global_beta.freqs)    
       
     # Calculate mean absolute power
     frontal_theta = psd_frontal_theta.get_data().mean(axis=0).mean()
