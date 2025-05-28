@@ -11,7 +11,7 @@ def process_nasatlx(nasatlx_stream):
     ]
     
     if nasatlx_stream is None:
-        return pd.DataFrame([[0] + [0]*6 + [pd.NaT]], columns=cols)
+        return pd.DataFrame([[np.nan] + [np.nan]*6 + [pd.NaT]], columns=cols)
     
     try:
         nasatlx_data = nasatlx_stream['time_series'][0]
