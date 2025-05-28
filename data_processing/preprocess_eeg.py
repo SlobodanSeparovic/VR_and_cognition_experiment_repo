@@ -66,7 +66,10 @@ def flag_eeg_artifacts_from_motion(raw, motion_df):
     timestamps_motion = motion_df['Timestamp'].values
     
     # Interpolate to EEG timeline
-    motion_artifact_interp = interpolate.interp1d(timestamps_motion, artifact_mask, kind='previous', bounds_error=False, fill_value=0.0)(raw.times)
+    motion_artifact_interp = interpolate.interp1d(
+        timestamps_motion, artifact_mask, 
+        kind='previous', bounds_error=False, fill_value=0.0
+    )(raw.times)
     artifact_mask_synced = (motion_artifact_interp > 0.5).astype(bool)
 
     # Find contiguous blocks
@@ -82,10 +85,69 @@ def flag_eeg_artifacts_from_motion(raw, motion_df):
     if len(onsets) == 0:
         return raw
 
-    # Create annotations
-    annotations = mne.Annotations(onset=onsets, duration=durations, description='bad_motion_artifact')
-    raw.set_annotations(raw.annotations + annotations)
+    # Create annotations with proper orig_time handling
+    orig_time = raw.annotations.orig_time if raw.annotations else (
+        raw.info['meas_date'] if raw.info['meas_date'] else None
+    )
+    motion_annotations = mne.Annotations(
+        onset=onsets,
+        duration=durations,
+        description='bad_motion_artifact',
+        orig_time=orig_time
+    )
+    
+    # Short segment handling for proper psd calculations as short segments may distort psd values (weighted the same as longer periods)
+    sfreq = int(raw.info['sfreq'])
+    
+    # Get clean periods (not motion artifacts)
+    clean_mask = np.ones(raw.n_times, dtype=bool)
+    for ann in motion_annotations:
+        # Convert to scalar indices
+        start_idx = int(raw.time_as_index(ann['onset'], use_rounding=True)[0])
+        end_idx = int(raw.time_as_index(ann['onset'] + ann['duration'], use_rounding=True)[0])
+        
+        # Clamp indices to valid range
+        start_idx = max(0, start_idx)
+        end_idx = min(end_idx, len(clean_mask) - 1)
+        
+        if start_idx < end_idx:  # Only modify if valid
+            clean_mask[start_idx:end_idx] = False
+    
+    # Find short clean segments
+    diff = np.diff(clean_mask.astype(int), prepend=0, append=0)
+    starts = np.where(diff == 1)[0]
+    ends = np.where(diff == -1)[0] - 1
+    
+    short_onsets = []
+    short_durations = []
+    for s, e in zip(starts, ends):
+        if (e - s + 1) < sfreq:  # 1 second at current sampling rate
+            short_onsets.append(raw.times[s])
+            short_durations.append((e - s + 1)/sfreq)
+
+    # Combine all annotations
+    all_annotations = motion_annotations
+    if short_onsets:
+        short_annotations = mne.Annotations(
+            onset=short_onsets,
+            duration=short_durations,
+            description='bad_short_segment',
+            orig_time=orig_time
+        )
+        all_annotations += short_annotations
+
+    # Remove invalid annotations (negative durations)
+    valid_mask = np.array(all_annotations.duration) > 0
+    all_annotations = mne.Annotations(
+        onset=np.array(all_annotations.onset)[valid_mask],
+        duration=np.array(all_annotations.duration)[valid_mask],
+        description=np.array(all_annotations.description)[valid_mask],
+        orig_time=all_annotations.orig_time
+    )
+    
+    raw.set_annotations(all_annotations)
     return raw
+
 
 def _create_raw(stream):
     eeg_data = np.array(stream["time_series"]).T / 1e6  # μV→V

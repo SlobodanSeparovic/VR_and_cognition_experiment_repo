@@ -38,8 +38,8 @@ def _calculate_band_power(raw):
     # Get frequency for proper binning of the data and ratio of data flagged as bad
     sfreq = int(raw.info['sfreq'])
     
-    # Calculate artifact percentage    
-    bad_samples = sum(int(ann['duration'] * sfreq) for ann in raw.annotations if ann['description'] == 'bad_motion_artifact')
+    # Calculate artifact percentage including short segments
+    bad_samples = sum(int(ann['duration'] * sfreq) for ann in raw.annotations if ann['description'] in ['bad_motion_artifact', 'bad_short_segment'])
     artifact_ratio = (bad_samples / raw.n_times) if raw.n_times > 0 else 0.0
         
     # Calculate power spectra while rejecting the motion artifact periods
