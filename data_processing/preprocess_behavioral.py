@@ -1,5 +1,6 @@
 import pandas as pd
 import re
+import numpy as np
 
 def process_nasatlx(nasatlx_stream):
     """Process NASA-TLX data or return empty scores if missing"""
@@ -83,11 +84,12 @@ def process_in_game_df(clean_df, meta):
     
     # Default values setup
     defaults = {
-        'F1Score': 0.0,
-        'AvgRtCorrect': 0.0,
-        'AvgRtIncorrect': 0.0,
-        'TotalResponses': 0,
-        'HitRate': 0.0
+        'F1': np.nan,
+        'RTCorrAv': np.nan,
+        'RTIncorrAv': np.nan,
+        'TotalPress': np.nan,
+        'CorrRatio': np.nan,
+        'IncorrNo' : np.nan        
     }
     
     # Remove 'Started' and 'Finished' from meta for the output DataFrame
@@ -121,11 +123,12 @@ def process_in_game_df(clean_df, meta):
         'N': clean_df['N'].iloc[0],
         'V': clean_df['V'].iloc[0],
         'Environment': environment,
-        'F1Score': f1,
-        'AvgRtCorrect': avg_rt_correct,
-        'AvgRtIncorrect': avg_rt_incorrect,
-        'TotalResponses': len(clean_df),
-        'HitRate': (tp / ACTUAL_POSITIVES)
-    }]).fillna(0)  # Fill NaN with 0
+        'F1': f1,
+        'RTCorrAv': avg_rt_correct,
+        'RTIncorrAv': avg_rt_incorrect,
+        'TotalPress': len(clean_df),
+        'CorrRatio': (tp / ACTUAL_POSITIVES),
+        'IncorrNo' : fp
+    }])
     
     return result_df
