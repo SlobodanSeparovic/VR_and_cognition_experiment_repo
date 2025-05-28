@@ -65,8 +65,8 @@ def main_single(input_file):
     # Create combined dataframe for saving
     combined_df = pd.concat([
         processed_game_df.drop(columns=['Environment', 'N', 'V']),
-        processed_nasatlx_df.drop(columns=['Timestamp'])
-        ], axis=1).assign(
+        processed_nasatlx_df.drop(columns=['NasatlxMental', 'NasatlxPhysical', 'NasatlxTemporal',
+        'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration', 'Timestamp'])], axis=1).assign(
         Env=processed_game_df['Environment'].iloc[0],
         N=processed_game_df['N'].iloc[0],
         V=processed_game_df['V'].iloc[0],

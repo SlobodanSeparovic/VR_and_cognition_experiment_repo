@@ -6,7 +6,7 @@ def process_nasatlx(nasatlx_stream):
     """Process NASA-TLX data or return empty scores if missing"""
     # Define column names with NasatlxCli first
     cols = [
-        'NasatlxCli', 'NasatlxMental', 'NasatlxPhysical', 'NasatlxTemporal',
+        'NasaCLI', 'NasatlxMental', 'NasatlxPhysical', 'NasatlxTemporal',
         'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration', 'Timestamp'
     ]
     
@@ -24,13 +24,13 @@ def process_nasatlx(nasatlx_stream):
     df = pd.DataFrame([nasatlx_data], columns=raw_cols)
     
     # Calculate NasatlxCli as sum of raw scores
-    df['NasatlxCli'] = df.sum(axis=1)
+    df['NasaCLI'] = df.sum(axis=1)
     
     # Add Timestamp column
     df['Timestamp'] = time_stamp
     
     # NasatlxCli column first
-    return df[['NasatlxCli'] + raw_cols + ['Timestamp']]
+    return df[['NasaCLI'] + raw_cols + ['Timestamp']]
 
 def process_game_performance(stream):
     """Process game data with empty dataframe handling"""
