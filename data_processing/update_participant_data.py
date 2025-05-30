@@ -2,6 +2,7 @@ import os
 import pandas as pd
 
 def update_participant_data(df, participant_id):
+    """Create csv file per participant or update if it already exists with new data"""
     # Create results directory structure
     results_dir = os.path.join('results', participant_id)
     os.makedirs(results_dir, exist_ok=True)
@@ -25,7 +26,7 @@ def update_participant_data(df, participant_id):
             df['N'].astype(str)
         )
         
-        # Remove existing entries that match new data's keys and drop them and handle empty columns
+        # Remove existing entries that match new data's keys, drop them and handle empty columns
         existing_clean = existing_df[~existing_df['_key'].isin(df['_key'])].drop(columns=['_key'])
         empty_cols_existing = existing_clean.columns[existing_clean.isna().all()].tolist()  # Identify empty columns
         existing_clean = existing_clean.drop(columns=empty_cols_existing)

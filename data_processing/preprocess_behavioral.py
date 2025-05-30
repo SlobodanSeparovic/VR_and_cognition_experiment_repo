@@ -4,7 +4,7 @@ import numpy as np
 
 def process_nasatlx(nasatlx_stream):
     """Process NASA-TLX data or return empty scores if missing"""
-    # Define column names with NasatlxCli first
+    # Define column names with NasatlxCli
     cols = [
         'NasaCLI', 'NasatlxMental', 'NasatlxPhysical', 'NasatlxTemporal',
         'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration', 'Timestamp'
@@ -19,7 +19,7 @@ def process_nasatlx(nasatlx_stream):
     except (KeyError, IndexError):
         return pd.DataFrame([[np.nan] + [np.nan]*6 + [pd.NaT]], columns=cols)
 
-    # Create DataFrame for raw scores (excluding NasatlxCli)
+    # Create dataframe for raw scores (excluding NasatlxCli)
     raw_cols = cols[1:-1]  # all except NasatlxCli and Timestamp
     df = pd.DataFrame([nasatlx_data], columns=raw_cols)
     
@@ -58,7 +58,6 @@ def process_game_performance(stream):
 
 def process_in_game_df(clean_df, meta):
     """Calculate metrics with empty dataframe support"""
-    
     # Rename environment
     # Full environment string
     environment = meta['Environment']
@@ -79,7 +78,7 @@ def process_in_game_df(clean_df, meta):
     }
     environment = mapping.get(environment, environment)
     
-    # Renaming the Environemnt column in meta DF 
+    # Renaming the Environment column in meta DF 
     meta['Environment'] = environment
     
     # Default values setup
@@ -92,7 +91,7 @@ def process_in_game_df(clean_df, meta):
         'IncorrNo' : np.nan        
     }
     
-    # Remove 'Started' and 'Finished' from meta for the output DataFrame
+    # Remove 'Started' and 'Finished' from meta for the output dataframe
     meta_no_markers = {k: v for k, v in meta.items() if k not in ['Started', 'Finished']}
     
     # Ensure to work for empty data (control condition)
@@ -117,8 +116,8 @@ def process_in_game_df(clean_df, meta):
     avg_rt_correct = rt_series[clean_df['AnswerCorrect'] == 1].mean()
     avg_rt_incorrect = rt_series[clean_df['AnswerCorrect'] == 0].mean()
     
-    # Create and return df with single row
-    # Create DataFrame and fill NaN
+    # Create and return dataframe with single row
+    # Create dataframe and fill NaN
     result_df = pd.DataFrame([{
         'N': clean_df['N'].iloc[0],
         'V': clean_df['V'].iloc[0],

@@ -11,7 +11,7 @@ from config.paths import get_paths
 
 def process_eeg(stream, input_filename, start_time, end_time, base_output_dir=None):
     """Process EEG data with intermediate saves at each step."""
-    # Get all paths from config-enabled module
+    # Get all paths from config module
     paths = get_paths(input_filename, base_output_dir)
      
     # Create raw data
@@ -96,17 +96,17 @@ def flag_eeg_artifacts_from_motion(raw, motion_df):
         orig_time=orig_time
     )
     
-    # Short segment handling for proper psd calculations as short segments may distort psd values (weighted the same as longer periods)
+    # Short segment handling for proper psd calculations. Short segments may distort psd values (weighted the same as longer periods).
     sfreq = int(raw.info['sfreq'])
     
     # Get clean periods (not motion artifacts)
     clean_mask = np.ones(raw.n_times, dtype=bool)
     for ann in motion_annotations:
-        # Convert to scalar indices
+        # Convert to integer indices
         start_idx = int(raw.time_as_index(ann['onset'], use_rounding=True)[0])
         end_idx = int(raw.time_as_index(ann['onset'] + ann['duration'], use_rounding=True)[0])
         
-        # Clamp indices to valid range
+        # Set indices to fit valid range
         start_idx = max(0, start_idx)
         end_idx = min(end_idx, len(clean_mask) - 1)
         
@@ -150,6 +150,7 @@ def flag_eeg_artifacts_from_motion(raw, motion_df):
 
 
 def _create_raw(stream):
+    """Create raw eeg from stream data"""
     eeg_data = np.array(stream["time_series"]).T / 1e6  # μV→V
     sfreq = float(stream["info"]["nominal_srate"][0])
     ch_names = "AF3,AF4,F3,Fz,F4,P3,Pz,P4".split(',')[:eeg_data.shape[0]]
@@ -161,6 +162,7 @@ def _create_raw(stream):
     return mne.io.RawArray(eeg_data, info)
 
 def _basic_filtering(raw):
+    """Apply primary step-basic filtering"""
     # Bandpass filter for project compatibility (preserve theta, alpha, beta)
     raw.filter(4, 30, fir_design='firwin')
     
@@ -169,7 +171,7 @@ def _basic_filtering(raw):
     return raw
 
 def _detect_bad_channels(raw, paths, min_peak, max_peak):
-    """Bad channel detection"""       
+    """Bad channel detection using peak-to-peak"""       
     # Calculate PTP values
     try:
         ptp_values = _calculate_ptp_percentile(raw, percentile=95)
@@ -206,7 +208,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak):
         f"- PTP values:\n"
     ) + "\n".join([f"  {ch}: {val}" for ch, val in details['ptp_values'].items()])
     
-    # Add critical error if missing regions
+    # Add error if missing regions
     if not (has_frontal and has_parietal):
         log_content += "\n\nERROR: Insufficient channels for index calculation - "
         log_content += "requires at least one frontal and one parietal channel!"
@@ -217,7 +219,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak):
     return bad_by_ptp
 
 def _ica_cleaning(raw, paths):
-    """Perform automated ICA artifact rejection for everything but brain and other."""
+    """Perform automated ICA component rejection for everything but brain and other"""
     # Ensure figures directory exists
     os.makedirs(paths['ica_components'], exist_ok=True)
     
@@ -238,7 +240,7 @@ def _ica_cleaning(raw, paths):
                             bbox_inches='tight')
         plt.close(fig_comp[0])
 
-    # Automated Exclusion---------------
+    # Automated Exclusion
     auto_excluded = []
     ic_labels = None
     try:
@@ -252,7 +254,7 @@ def _ica_cleaning(raw, paths):
     
     ica.exclude = auto_excluded
 
-    # Reporting Phase---------------
+    # Reporting phase
     fig = plt.figure(figsize=(14, 8), dpi=100)
     gs = gridspec.GridSpec(nrows=3, ncols=4, height_ratios=[2, 2, 1])
 

@@ -85,7 +85,7 @@ def _process_participant_file(file_path):
             axis=1
         )
     
-    # Encode task difficulty: 2-back -> 0, 3-back -> 1
+    # Encode task difficulty: 2-back as 0, 3-back as 1
     task_df['N'] = task_df['N'].map({2: 0, 3: 1})
     
     # Select and order output columns
@@ -119,10 +119,10 @@ def _calculate_corrected_value(row, baseline_df, column):
         return np.nan
 
 def _update_final_dataset(final_path, new_data):
-    """Update master dataset with new entries"""
+    """Update main dataset with new entries"""
     if final_path.exists():
         existing_df = pd.read_csv(final_path)
-        # Create composite keys for deduplication
+        # Create composite keys for checking duplicate entries
         existing_df['_key'] = existing_df.astype(str).apply('|'.join, axis=1)
         new_data['_key'] = new_data.astype(str).apply('|'.join, axis=1)
         

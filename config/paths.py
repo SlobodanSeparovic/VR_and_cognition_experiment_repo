@@ -3,7 +3,7 @@ import os
 import re
 
 def get_project_root(marker="settings.ini"):
-    """Find project root by searching for a marker file."""
+    """Find project root by searching for a marker file"""
     path = Path(__file__).resolve()
     for parent in [path] + list(path.parents):
         if (parent / marker).exists():
@@ -11,7 +11,7 @@ def get_project_root(marker="settings.ini"):
     raise FileNotFoundError(f"Could not find project root with marker '{marker}'.")
 
 def get_paths(input_file, base_output_dir=None):
-    """Generate paths without session numbers in the directory structure."""
+    """Generate paths without session numbers in the directory structure"""
     # Extract subject and task (ignore session)
     base_name = os.path.basename(input_file)
        

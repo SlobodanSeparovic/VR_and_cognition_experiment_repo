@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 def calculate_kinematics(stream, start_time, end_time, buffer):
-    """ Calculate kinematics. """
+    """Calculate kinematics"""
     # Stream to df
     motion_cols = [
         'HmdPosX', 'HmdPosY', 'HmdPosZ', 'HmdRotX', 'HmdRotY', 'HmdRotZ', 'HmdRotW',
@@ -16,7 +16,7 @@ def calculate_kinematics(stream, start_time, end_time, buffer):
     # Crop to task duration
     df_cropped = df[(df['Timestamp'] >= start_time) & (df['Timestamp'] <= end_time)].copy()
     
-    # Convert motion timestamps to relative time (like EEG)
+    # Convert motion timestamps to relative time (like EEG for alignment)
     df_cropped['Timestamp'] = df_cropped['Timestamp'] - df_cropped['Timestamp'].min()
 
     # Calculate velocities (first row will have NaN from buffer pre-task)
@@ -38,7 +38,7 @@ def calculate_kinematics(stream, start_time, end_time, buffer):
     return df_cropped
 
 def _calc_linear_velocity(df, device):
-    """Calculate 3D linear velocity in m/s from positional data."""
+    """Calculate 3D linear velocity in m/s from positional data"""
     pos_cols = [f'{device}PosX', f'{device}PosY', f'{device}PosZ']
     
     # Calculate actual time differences between samples
@@ -50,7 +50,7 @@ def _calc_linear_velocity(df, device):
     # Handle missing/zero values using real average delta
     time_deltas = time_deltas.fillna(avg_delta).replace(0, avg_delta)
     
-    # Calculate positional displacement (Δx, Δy, Δz)
+    # Calculate positional displacement (delta x, delta y, delta z)
     displacement = df[pos_cols].diff()
     
     # Compute velocity magnitude (norm of displacement / time)
@@ -58,7 +58,7 @@ def _calc_linear_velocity(df, device):
     return df
 
 def _calc_angular_velocity(df, device):
-    """Calculate angular velocity from quaternion differences (radians/second)."""
+    """Calculate angular velocity from quaternion differences (radians/second)"""
     quat_cols = [f'{device}RotX', f'{device}RotY', f'{device}RotZ', f'{device}RotW']
     
     # Normalize quaternions to ensure unit length
@@ -87,6 +87,7 @@ def _calc_angular_velocity(df, device):
     return df
 
 def _calculate_thresholds(df, percentile=99.9):
+    """Calculate motion change thresholds using specified percentile value"""
     thresholds = {}
     devices = ['Hmd', 'Left', 'Right']
     for device in devices:
@@ -101,7 +102,7 @@ def _flag_artifacts(df, thresholds, buffer):
     df = df.copy()
     df['MotionArtifact'] = False
     
-    # Initial assymatric buffer (handled separately as no buffer needs to be added to it later)
+    # Initial asymmetric buffer (handled separately as no buffer needs to be added to it later)
     start_time = df['Timestamp'].min()
     initial_end = start_time + (buffer * 0.75)
     initial_mask = (df['Timestamp'] >= start_time) & (df['Timestamp'] <= initial_end)
@@ -122,7 +123,7 @@ def _flag_artifacts(df, thresholds, buffer):
         trigger_offset = (trigger_col.diff() < -0.5)
         other_artifacts |= trigger_offset.fillna(False)
     
-    # Apply assymetric buffer only to non-initial artifacts
+    # Apply asymmetric buffer only to non-initial artifacts
     artifact_times = df[other_artifacts]['Timestamp']
     buffered_other_artifacts = pd.Series(False, index=df.index)
     for t in artifact_times:

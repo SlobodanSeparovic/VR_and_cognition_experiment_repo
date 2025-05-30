@@ -15,8 +15,8 @@ def process_directory(directory):
                     full_path = os.path.abspath(os.path.join(dirpath, f))
                     xdf_paths.add(full_path)
     
-    # Convert to sorted list
-    sorted_xdf_paths = sorted(xdf_paths)  # Alphabetical order
+    # Convert to sorted list in alphabetical order
+    sorted_xdf_paths = sorted(xdf_paths)
     
     # Process collected files
     for file_path in sorted_xdf_paths:

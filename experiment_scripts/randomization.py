@@ -1,8 +1,8 @@
 import random
 import csv
 
-# Function to generate randomized order for each participant
 def randomize_experiment_order(participants):
+    """Generate randomized order for each participant"""
     environments = ['Control', 'Urban', 'Nature']
     tasks = ['2-back', '3-back']
     versions = ['Version 1', 'Version 2', 'Version 3']
@@ -26,9 +26,9 @@ def randomize_experiment_order(participants):
         # Randomize the task-environment pairings
         random.shuffle(task_environment_pairs)
         
-        # Shuffle versions independently for 1-back and 2-back tasks
-        available_2back_versions = random.sample(versions, len(versions))  # Shuffle versions for 1-back
-        available_3back_versions = random.sample(versions, len(versions))  # Shuffle versions for 2-back
+        # Shuffle versions independently for 2-back and 3-back tasks
+        available_2back_versions = random.sample(versions, len(versions))  # Shuffle versions for 2-back
+        available_3back_versions = random.sample(versions, len(versions))  # Shuffle versions for 3-back
         
         # Assign versions to the task-environment pairs
         task_assignments = {}
@@ -46,8 +46,8 @@ def randomize_experiment_order(participants):
     
     return randomized_orders
 
-# Function to save randomized order to a CSV file
 def save_random_seq_csv(randomized_orders, filename):
+    """Save randomized order to a CSV file"""
     with open(filename, mode='w', newline='') as file:
         writer = csv.writer(file)
         
