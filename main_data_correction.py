@@ -67,7 +67,7 @@ def _process_participant_file(file_path):
     df['Subject'] = df['Subject'].str.replace('P', '').astype(int)
     
     # Encode environment as numeric
-    environment_mapping = {'Control': 0, 'Nature': 1, 'Urban': 2}
+    environment_mapping = {'Control': 1, 'Nature': 2, 'Urban': 3}
     df['Env'] = df['Env'].map(environment_mapping)
     
     # Separate baseline and task data
