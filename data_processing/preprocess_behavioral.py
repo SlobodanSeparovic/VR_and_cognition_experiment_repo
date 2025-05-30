@@ -17,7 +17,7 @@ def process_nasatlx(nasatlx_stream):
         nasatlx_data = nasatlx_stream['time_series'][0]
         time_stamp = nasatlx_stream['time_stamps'][-1]
     except (KeyError, IndexError):
-        return pd.DataFrame([[0] + [0]*6 + [pd.NaT]], columns=cols)
+        return pd.DataFrame([[np.nan] + [np.nan]*6 + [pd.NaT]], columns=cols)
 
     # Create DataFrame for raw scores (excluding NasatlxCli)
     raw_cols = cols[1:-1]  # all except NasatlxCli and Timestamp
@@ -108,11 +108,11 @@ def process_in_game_df(clean_df, meta):
     fn = ACTUAL_POSITIVES - tp  # Missed targets
     
     # Precision/Recall with division guards
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else np.nan
+    recall = tp / (tp + fn) if (tp + fn) > 0 else np.nan
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else np.nan
 
-    # Reaction time analysis
+    # Reaction time analysis - sets them to nan if there are no answers
     rt_series = clean_df['ReactionTime']
     avg_rt_correct = rt_series[clean_df['AnswerCorrect'] == 1].mean()
     avg_rt_incorrect = rt_series[clean_df['AnswerCorrect'] == 0].mean()
