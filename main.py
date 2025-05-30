@@ -23,7 +23,7 @@ input_file = config['INPUT']['input_file']
 mode = int(config['INPUT'].get('mode', '1'))  # Default to single file mode
 
 def main_single(input_file):
-    """;ain for single XDF file processing"""       
+    """Main for single XDF file processing"""       
     # Read and align all data streams
     streams = read_xdf.load_xdf(input_file)
     
