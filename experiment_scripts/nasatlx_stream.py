@@ -45,9 +45,6 @@ root = tk.Tk()
 root.title("NASA TLX Questionnaire")
 root.geometry("600x700")
 
-# Set the window to open in full screen
-# root.attributes('-fullscreen', True)
-
 # Adjust the responses to work with a 0-100 scale with increments of 5
 responses = [tk.IntVar(value=50) for _ in questions]  # Default to midpoint (50)
 

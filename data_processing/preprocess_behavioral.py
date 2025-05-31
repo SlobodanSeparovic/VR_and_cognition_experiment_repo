@@ -1,33 +1,36 @@
 import pandas as pd
 import re
+import numpy as np
 
 def process_nasatlx(nasatlx_stream):
     """Process NASA-TLX data or return empty scores if missing"""
-    # Define column names
+    # Define column names with NasatlxCli
     cols = [
-        'NasatlxMental', 'NasatlxPhysical', 'NadatlxTemporal',
-        'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration',
-        'Timestamp', 'NasatlxCli'
+        'NasaCLI', 'NasatlxMental', 'NasatlxPhysical', 'NasatlxTemporal',
+        'NasatlxPerformance', 'NasatlxEffort', 'NasatlxFrustration', 'Timestamp'
     ]
     
     if nasatlx_stream is None:
-        # Return zero-filled dataframe with correct columns
-        return pd.DataFrame([[0]*6 + [pd.NaT, 0]], columns=cols)
+        return pd.DataFrame([[np.nan] + [np.nan]*6 + [pd.NaT]], columns=cols)
     
     try:
         nasatlx_data = nasatlx_stream['time_series'][0]
         time_stamp = nasatlx_stream['time_stamps'][-1]
     except (KeyError, IndexError):
-        return pd.DataFrame([[0]*6 + [pd.NaT, 0]], columns=cols)
+        return pd.DataFrame([[np.nan] + [np.nan]*6 + [pd.NaT]], columns=cols)
 
-    # Create DataFrame with raw scores
-    df = pd.DataFrame([nasatlx_data], columns=cols[:6])
+    # Create dataframe for raw scores (excluding NasatlxCli)
+    raw_cols = cols[1:-1]  # all except NasatlxCli and Timestamp
+    df = pd.DataFrame([nasatlx_data], columns=raw_cols)
     
-    # Add metadata and calculate CLI
+    # Calculate NasatlxCli as sum of raw scores
+    df['NasaCLI'] = df.sum(axis=1)
+    
+    # Add Timestamp column
     df['Timestamp'] = time_stamp
-    df['NasatlxCli'] = df.iloc[:, :6].sum(axis=1)
-     
-    return df[cols]  # Ensure consistent column order
+    
+    # NasatlxCli column first
+    return df[['NasaCLI'] + raw_cols + ['Timestamp']]
 
 def process_game_performance(stream):
     """Process game data with empty dataframe handling"""
@@ -39,8 +42,8 @@ def process_game_performance(stream):
     # Extract metadata before filtering
     meta = {
         'Environment': stream['info']['name'][-1],
-        'N': full_df['N'].iloc[-1],
-        'V': full_df['V'].iloc[-1],
+        'N': full_df[full_df['Finished'] == 1.0]['N'].iloc[0],
+        'V': full_df[full_df['Finished'] == 1.0]['V'].iloc[0],
         'Started': full_df[full_df['Started'] == 1.0]['Timestamp'].iloc[0],
         'Finished': full_df[full_df['Finished'] == 1.0]['Timestamp'].iloc[0]
     }
@@ -55,7 +58,6 @@ def process_game_performance(stream):
 
 def process_in_game_df(clean_df, meta):
     """Calculate metrics with empty dataframe support"""
-    
     # Rename environment
     # Full environment string
     environment = meta['Environment']
@@ -76,19 +78,20 @@ def process_in_game_df(clean_df, meta):
     }
     environment = mapping.get(environment, environment)
     
-    # Renaming the Environemnt column in meta DF 
+    # Renaming the Environment column in meta DF 
     meta['Environment'] = environment
     
     # Default values setup
     defaults = {
-        'F1Score': 0.0,
-        'AvgRtCorrect': 0.0,
-        'AvgRtIncorrect': 0.0,
-        'TotalResponses': 0,
-        'HitRate': 0.0
+        'F1': np.nan,
+        'RTCorrAv': np.nan,
+        'RTIncorrAv': np.nan,
+        'TotalPress': np.nan,
+        'CorrRatio': np.nan,
+        'IncorrNo' : np.nan        
     }
     
-    # Remove 'Started' and 'Finished' from meta for the output DataFrame
+    # Remove 'Started' and 'Finished' from meta for the output dataframe
     meta_no_markers = {k: v for k, v in meta.items() if k not in ['Started', 'Finished']}
     
     # Ensure to work for empty data (control condition)
@@ -104,26 +107,27 @@ def process_in_game_df(clean_df, meta):
     fn = ACTUAL_POSITIVES - tp  # Missed targets
     
     # Precision/Recall with division guards
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else np.nan
+    recall = tp / (tp + fn) if (tp + fn) > 0 else np.nan
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else np.nan
 
-    # Reaction time analysis
+    # Reaction time analysis - sets them to nan if there are no answers
     rt_series = clean_df['ReactionTime']
     avg_rt_correct = rt_series[clean_df['AnswerCorrect'] == 1].mean()
     avg_rt_incorrect = rt_series[clean_df['AnswerCorrect'] == 0].mean()
     
-    # Create and return df with single row
-    # Create DataFrame and fill NaN
+    # Create and return dataframe with single row
+    # Create dataframe and fill NaN
     result_df = pd.DataFrame([{
         'N': clean_df['N'].iloc[0],
         'V': clean_df['V'].iloc[0],
         'Environment': environment,
-        'F1Score': round(f1, 6),
-        'AvgRtCorrect': round(avg_rt_correct, 6),
-        'AvgRtIncorrect': round(avg_rt_incorrect, 6),
-        'TotalResponses': len(clean_df),
-        'HitRate': round(tp / ACTUAL_POSITIVES, 6)
-    }]).fillna(0)  # Fill NaN with 0
+        'F1': f1,
+        'RTCorrAv': avg_rt_correct,
+        'RTIncorrAv': avg_rt_incorrect,
+        'TotalPress': len(clean_df),
+        'CorrRatio': (tp / ACTUAL_POSITIVES),
+        'IncorrNo' : fp
+    }])
     
     return result_df

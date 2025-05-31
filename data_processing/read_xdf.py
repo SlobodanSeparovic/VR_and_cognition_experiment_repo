@@ -2,6 +2,7 @@ import pyxdf
 import pandas as pd
 
 def load_xdf(fname):
+    """Load XDF file"""
     streams, _ = pyxdf.load_xdf(fname, synchronize_clocks=True)
     
     return {
@@ -15,8 +16,9 @@ def load_xdf(fname):
     }
     
 def _find_stream(streams, predicate):
-        try:
-            return next(s for s in streams if predicate(s))
-        except StopIteration:
-            print(f"Warning: Missing {predicate.__name__} stream")
-            return None
+    """Locate streams within XDF file"""
+    try:
+        return next(s for s in streams if predicate(s))
+    except StopIteration:
+        print(f"Warning: Missing {predicate.__name__} stream")
+        return None

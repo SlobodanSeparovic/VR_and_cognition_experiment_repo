@@ -3,7 +3,7 @@ import os
 import re
 
 def get_project_root(marker="settings.ini"):
-    """Find project root by searching for a marker file."""
+    """Find project root by searching for a marker file"""
     path = Path(__file__).resolve()
     for parent in [path] + list(path.parents):
         if (parent / marker).exists():
@@ -11,7 +11,7 @@ def get_project_root(marker="settings.ini"):
     raise FileNotFoundError(f"Could not find project root with marker '{marker}'.")
 
 def get_paths(input_file, base_output_dir=None):
-    """Generate paths without session numbers in the directory structure."""
+    """Generate paths without session numbers in the directory structure"""
     # Extract subject and task (ignore session)
     base_name = os.path.basename(input_file)
        
@@ -25,14 +25,14 @@ def get_paths(input_file, base_output_dir=None):
     if not base_output_dir:
         base_output_dir = get_project_root() / 'data'
 
-    # Define directory structure WITHOUT sessions
+    # Define directory structure with no sessions
     path_template = {
         'root': Path(base_output_dir) / subject / task,
         'raw': '00_raw',
         'filtered': '01_filtered',
         'bad_channels': '02_bad_channels',
         'ica': '03_ica_cleaned',
-        'figures': 'reports/figures',
+        'ica_components': 'reports/ica_components',
         'logs': 'reports/logs'
     }
 
@@ -46,15 +46,13 @@ def get_paths(input_file, base_output_dir=None):
     # Add file-specific paths
     base_stem = base_name.replace('.xdf', '')
     paths.update({
-        'subject': subject,
-        'task': task,
-        'raw_fif': Path(paths['raw']) / f'{base_stem}_raw.fif',
-        'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered.fif',
-        'bad_channels_fif': Path(paths['bad_channels']) / f'{base_stem}_badchansremoved.fif',
-        'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned.fif',
-        'processing_log': Path(paths['logs']) / f'{base_stem}_processing_log.txt',
-        'ica_report': Path(paths['figures']) / f'{base_stem}_ica_report.png',
-        'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt' 
+        'raw_fif': Path(paths['raw']) / f'{base_stem}_eeg.fif',  # raw → eeg
+        'filtered_fif': Path(paths['filtered']) / f'{base_stem}_filtered_eeg.fif',
+        'bad_channels_fif': Path(paths['bad_channels']) / f'{base_stem}_badchansremoved_eeg.fif',
+        'ica_fif': Path(paths['ica']) / f'{base_stem}_ica_cleaned_eeg.fif',
+        'bad_channels_log': Path(paths['logs']) / f'{base_stem}_bad_channels_log.txt',
+        'ica_report': Path(paths['logs']) / f'{base_stem}_ica_report.png',
+        'ica_rejection_log': Path(paths['logs']) / f'{base_stem}_ica_rejection.txt'
     })
 
     return paths

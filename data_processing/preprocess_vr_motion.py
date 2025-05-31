@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 def calculate_kinematics(stream, start_time, end_time, buffer):
-    """ Calculate kinematics. """
+    """Calculate kinematics"""
     # Stream to df
     motion_cols = [
         'HmdPosX', 'HmdPosY', 'HmdPosZ', 'HmdRotX', 'HmdRotY', 'HmdRotZ', 'HmdRotW',
@@ -14,10 +14,10 @@ def calculate_kinematics(stream, start_time, end_time, buffer):
     df['Timestamp'] = stream["time_stamps"]
     
     # Crop to task duration
-    df_cropped = df[
-        (df['Timestamp'] >= start_time) & 
-        (df['Timestamp'] <= end_time)
-    ].copy()
+    df_cropped = df[(df['Timestamp'] >= start_time) & (df['Timestamp'] <= end_time)].copy()
+    
+    # Convert motion timestamps to relative time (like EEG for alignment)
+    df_cropped['Timestamp'] = df_cropped['Timestamp'] - df_cropped['Timestamp'].min()
 
     # Calculate velocities (first row will have NaN from buffer pre-task)
     devices = ['Hmd', 'Left', 'Right']
@@ -38,7 +38,7 @@ def calculate_kinematics(stream, start_time, end_time, buffer):
     return df_cropped
 
 def _calc_linear_velocity(df, device):
-    """Calculate 3D linear velocity in m/s from positional data."""
+    """Calculate 3D linear velocity in m/s from positional data"""
     pos_cols = [f'{device}PosX', f'{device}PosY', f'{device}PosZ']
     
     # Calculate actual time differences between samples
@@ -50,7 +50,7 @@ def _calc_linear_velocity(df, device):
     # Handle missing/zero values using real average delta
     time_deltas = time_deltas.fillna(avg_delta).replace(0, avg_delta)
     
-    # Calculate positional displacement (Δx, Δy, Δz)
+    # Calculate positional displacement (delta x, delta y, delta z)
     displacement = df[pos_cols].diff()
     
     # Compute velocity magnitude (norm of displacement / time)
@@ -58,7 +58,7 @@ def _calc_linear_velocity(df, device):
     return df
 
 def _calc_angular_velocity(df, device):
-    """Calculate angular velocity from quaternion differences (radians/second)."""
+    """Calculate angular velocity from quaternion differences (radians/second)"""
     quat_cols = [f'{device}RotX', f'{device}RotY', f'{device}RotZ', f'{device}RotW']
     
     # Normalize quaternions to ensure unit length
@@ -86,7 +86,8 @@ def _calc_angular_velocity(df, device):
     df[f'{device}AngularVelocity'] = angular_velocity
     return df
 
-def _calculate_thresholds(df, percentile=95):
+def _calculate_thresholds(df, percentile=99.9):
+    """Calculate motion change thresholds using specified percentile value"""
     thresholds = {}
     devices = ['Hmd', 'Left', 'Right']
     for device in devices:
@@ -97,31 +98,38 @@ def _calculate_thresholds(df, percentile=95):
     return thresholds
 
 def _flag_artifacts(df, thresholds, buffer):
-    """Flag artifacts with 200ms buffers, incuding inital buffer handled separately as task was initiated with a trigger"""
+    """Flag artifacts with buffers, incuding inital buffer handled separately as task was initiated with a trigger"""
     df = df.copy()
     df['MotionArtifact'] = False
     
-    # Initial buffer (handled separately as no buffer needs to be added to it later)
+    # Initial asymmetric buffer (handled separately as no buffer needs to be added to it later)
     start_time = df['Timestamp'].min()
-    initial_end = start_time + buffer
+    initial_end = start_time + (buffer * 0.75)
     initial_mask = (df['Timestamp'] >= start_time) & (df['Timestamp'] <= initial_end)
-    
+
     # Motion/trigger artifacts (exclude initial buffer from this logic)
-    other_artifacts = False
+    other_artifacts = pd.Series(False, index=df.index)
     for device in ['Hmd', 'Left', 'Right']:
         lin_mask = df[f'{device}Velocity'] > thresholds[f'{device}_lin']
         ang_mask = df[f'{device}AngularVelocity'] > thresholds[f'{device}_ang']
         other_artifacts |= lin_mask | ang_mask
     
     for side in ['Left', 'Right']:
-        other_artifacts |= df[f'{side}Trigger'] == 1.0
+        trigger_col = df[f'{side}Trigger']
+        # Detect trigger onsets (button press)
+        trigger_onset = (trigger_col.diff() > 0.5)
+        other_artifacts |= trigger_onset.fillna(False)
+        # Detect trigger offsets (button release)
+        trigger_offset = (trigger_col.diff() < -0.5)
+        other_artifacts |= trigger_offset.fillna(False)
     
-    # Apply buffer only to non-initial artifacts
+    # Apply asymmetric buffer only to non-initial artifacts
     artifact_times = df[other_artifacts]['Timestamp']
-    buffered_other_artifacts = False
+    buffered_other_artifacts = pd.Series(False, index=df.index)
     for t in artifact_times:
-        buffered_other_artifacts |= (df['Timestamp'] >= t - buffer) & (df['Timestamp'] <= t + buffer)
+        buffered_other_artifacts |= (df['Timestamp'] >= t - (buffer * 0.25)) & (df['Timestamp'] <= t + (buffer * 0.75))
     
     # Combine masks (initial buffer + other buffered artifacts)
     df['MotionArtifact'] = initial_mask | buffered_other_artifacts
+
     return df
