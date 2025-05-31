@@ -40,7 +40,7 @@ def process_all_participants(results_dir='results'):
         
         # Define and enforce column order
         column_order = [
-            'Subject', 'Env', 'N', 'NasaCLI', 'FTCLI_corrected',
+            'Subject', 'Env_Control', 'Env_Nature', 'Env_Urban', 'N', 'NasaCLI', 'FTCLI_corrected',
             'FTPACLI_corrected', 'EngI_corrected', 'F1', 'TotalPress',
             'IncorrNo', 'CorrRatio', 'RTCorrAv', 'RTIncorrAv'
         ]
@@ -66,9 +66,8 @@ def _process_participant_file(file_path):
     # Clean subject ID
     df['Subject'] = df['Subject'].str.replace('P', '').astype(int)
     
-    # Encode environment as numeric
-    environment_mapping = {'Control': 1, 'Nature': 2, 'Urban': 3}
-    df['Env'] = df['Env'].map(environment_mapping)
+    # One-hot encode the 'Env' column
+    df = pd.get_dummies(df, columns=['Env'])
     
     # Separate baseline and task data
     baseline_df = df[df['N'] == 0].copy()
@@ -90,22 +89,31 @@ def _process_participant_file(file_path):
     
     # Select and order output columns
     output_columns = [
-        'Subject', 'Env', 'N', 'NasaCLI', 'FTCLI_corrected',
+        'Subject', 'Env_Control', 'Env_Nature', 'Env_Urban', 'N', 'NasaCLI', 'FTCLI_corrected',
         'FTPACLI_corrected', 'EngI_corrected', 'F1', 'TotalPress',
         'IncorrNo', 'CorrRatio', 'RTCorrAv', 'RTIncorrAv'
     ]
     corrected_df = task_df[output_columns]
     
     # Prepare motion artifacts data (includes baseline)
-    motion_data = df[['Subject', 'N', 'Env', 'MotionArt']].copy()
+    motion_data = df[['Subject', 'N', 'Env_Control', 'Env_Nature', 'Env_Urban', 'MotionArt']].copy()
     
-    return corrected_df.sort_values(['Env', 'N']).reset_index(drop=True), motion_data
+    return corrected_df.sort_values(['Env_Control', 'Env_Nature', 'Env_Urban', 'N']).reset_index(drop=True), motion_data
 
 def _calculate_corrected_value(row, baseline_df, column):
     """Calculate baseline-normalized metric values"""
+    # Find the Env column in row that is 1
+    env_cols = ['Env_Control', 'Env_Nature', 'Env_Urban']
+    env_active = [col for col in env_cols if row[col] == 1]
+    if len(env_active) == 1:
+        env_col = env_active[0]
+    else:
+        raise ValueError("Row has ambiguous or no active Env encoding")
+    
     try:
+        # Filter baseline_df where the same Env column is 1 and Subject matches
         baseline = baseline_df.loc[
-            (baseline_df['Env'] == row['Env']) &
+            (baseline_df[env_col] == 1) &
             (baseline_df['Subject'] == row['Subject']),
             column
         ].values[0]
@@ -119,18 +127,23 @@ def _calculate_corrected_value(row, baseline_df, column):
         return np.nan
 
 def _update_final_dataset(final_path, new_data):
-    """Update main dataset with new entries"""
+    """Update main dataset with new entries using targeted composite keys"""
+    # Define identity columns for composite key
+    identity_columns = ['Subject', 'Env_Control', 'Env_Nature', 'Env_Urban', 'N']
+    
     if final_path.exists():
         existing_df = pd.read_csv(final_path)
-        # Create composite keys for checking duplicate entries
-        existing_df['_key'] = existing_df.astype(str).apply('|'.join, axis=1)
-        new_data['_key'] = new_data.astype(str).apply('|'.join, axis=1)
         
-        # Remove existing entries that match new data
+        # Create keys using only identity columns
+        existing_df['_key'] = existing_df[identity_columns].astype(str).agg('|'.join, axis=1)
+        new_data['_key'] = new_data[identity_columns].astype(str).agg('|'.join, axis=1)
+        
+        # Remove existing entries that match new data keys
         existing_df = existing_df[~existing_df['_key'].isin(new_data['_key'])]
-        updated_df = pd.concat([existing_df.drop('_key', axis=1), new_data.drop('_key', axis=1)])
+        updated_df = pd.concat([existing_df.drop('_key', axis=1), 
+                              new_data.drop('_key', axis=1)])
     else:
-        updated_df = new_data.drop('_key', axis=1, errors='ignore')
+        updated_df = new_data
     
     updated_df.to_csv(final_path, index=False)
     return updated_df
