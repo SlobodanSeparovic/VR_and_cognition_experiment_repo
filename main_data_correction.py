@@ -40,7 +40,7 @@ def process_all_participants(results_dir='results'):
         
         # Define and enforce column order
         column_order = [
-            'Subject', 'Env_Control', 'Env_Nature', 'Env_Urban', 'N', 'NasaCLI', 'FTCLI_corrected',
+            'Subject', 'Env', 'N', 'NasaCLI', 'FTCLI_corrected',
             'FTPACLI_corrected', 'EngI_corrected', 'F1', 'TotalPress',
             'IncorrNo', 'CorrRatio', 'RTCorrAv', 'RTIncorrAv'
         ]
@@ -65,10 +65,7 @@ def _process_participant_file(file_path):
     
     # Clean subject ID
     df['Subject'] = df['Subject'].str.replace('P', '').astype(int)
-    
-    # One-hot encode the 'Env' column
-    df = pd.get_dummies(df, columns=['Env'])
-    
+  
     # Separate baseline and task data
     baseline_df = df[df['N'] == 0].copy()
     task_df = df[df['N'] != 0].copy()
@@ -84,36 +81,29 @@ def _process_participant_file(file_path):
             axis=1
         )
     
-    # Encode task difficulty: 2-back as 0, 3-back as 1
-    task_df['N'] = task_df['N'].map({2: 0, 3: 1})
-    
     # Select and order output columns
     output_columns = [
-        'Subject', 'Env_Control', 'Env_Nature', 'Env_Urban', 'N', 'NasaCLI', 'FTCLI_corrected',
+        'Subject', 'Env', 'N', 'NasaCLI', 'FTCLI_corrected',
         'FTPACLI_corrected', 'EngI_corrected', 'F1', 'TotalPress',
         'IncorrNo', 'CorrRatio', 'RTCorrAv', 'RTIncorrAv'
     ]
     corrected_df = task_df[output_columns]
     
     # Prepare motion artifacts data (includes baseline)
-    motion_data = df[['Subject', 'N', 'Env_Control', 'Env_Nature', 'Env_Urban', 'MotionArt']].copy()
+    motion_data = df[['Subject', 'N', 'Env', 'MotionArt']].copy()
     
-    return corrected_df.sort_values(['Env_Control', 'Env_Nature', 'Env_Urban', 'N']).reset_index(drop=True), motion_data
+    return corrected_df.sort_values(['Env', 'N']).reset_index(drop=True), motion_data
 
 def _calculate_corrected_value(row, baseline_df, column):
     """Calculate baseline-normalized metric values"""
-    # Find the Env column in row that is 1
-    env_cols = ['Env_Control', 'Env_Nature', 'Env_Urban']
-    env_active = [col for col in env_cols if row[col] == 1]
-    if len(env_active) == 1:
-        env_col = env_active[0]
-    else:
-        raise ValueError("Row has ambiguous or no active Env encoding")
+    # Get environment
+    env = row['Env'] 
+
     
     try:
-        # Filter baseline_df where the same Env column is 1 and Subject matches
+        # Filter baseline_df for matching subject and environment
         baseline = baseline_df.loc[
-            (baseline_df[env_col] == 1) &
+            (baseline_df['Env'] == env) &
             (baseline_df['Subject'] == row['Subject']),
             column
         ].values[0]
@@ -129,7 +119,7 @@ def _calculate_corrected_value(row, baseline_df, column):
 def _update_final_dataset(final_path, new_data):
     """Update main dataset with new entries using targeted composite keys"""
     # Define identity columns for composite key
-    identity_columns = ['Subject', 'Env_Control', 'Env_Nature', 'Env_Urban', 'N']
+    identity_columns = ['Subject', 'Env', 'N']
     
     if final_path.exists():
         existing_df = pd.read_csv(final_path)
