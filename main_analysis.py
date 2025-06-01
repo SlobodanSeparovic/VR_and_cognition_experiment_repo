@@ -41,11 +41,15 @@ def load_dataset():
     return df
 
 def check_repeated_measures_assumptions(data, dvs):
-    """Comprehensive check of RM-MANOVA assumptions, sphericity is corrected if RM-MANOVA is done"""
+    """Check of RM-MANOVA assumptions"""
     assumptions = {
         'normality': {},
         'multicollinearity': None
     }
+    
+    # Separate indices
+    subjective_dvs = ['NasaCLI']  # Protected from removal
+    physiological_dvs = [dv for dv in dvs if dv not in subjective_dvs]
     
     # 1. Normality checks (Shapiro-Wilk per group)
     logging.info("\nChecking normality assumptions...")
@@ -58,14 +62,15 @@ def check_repeated_measures_assumptions(data, dvs):
                 if p < 0.05:
                     logging.warning(f"Normality violated: {dv} in {env}/N{n} (p={p:.4f})")
 
-    # 2. Multicollinearity check
-    corr_matrix = data[dvs].corr().abs()
-    high_corr = corr_matrix[(corr_matrix > 0.7) & (corr_matrix < 1.0)].stack()
-    if not high_corr.empty:
-        logging.warning("High correlations detected (>0.7):")
-        for (v1, v2), val in high_corr.items():
-            logging.warning(f"{v1} ↔ {v2}: {val:.2f}")
-    assumptions['multicollinearity'] = high_corr
+    # 2. Multicollinearity check (only for physiological indices)
+    if physiological_dvs:
+        corr_matrix = data[physiological_dvs].corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [col for col in upper.columns if any(upper[col] > 0.7)]
+    else:
+        to_drop = []
+    
+    assumptions['multicollinearity'] = to_drop
 
     # Save assumption checks
     pd.DataFrame(assumptions['normality'], index=['p-value']).T.to_csv(
@@ -233,10 +238,16 @@ def main():
         logging.info("\n=== Initial Assumption Check ===")
         assumptions = check_repeated_measures_assumptions(data, dvs)
         
-        # Handle multicollinearity
-        final_dvs = [dv for dv in dvs if dv not in assumptions['multicollinearity'].index.get_level_values(0)]
+        # Handle multicollinearity (only physiological indices)
+        physiological_dvs = [dv for dv in dvs if dv != 'NasaCLI']
+        final_physiological = [dv for dv in physiological_dvs 
+                              if dv not in assumptions['multicollinearity']]
+        
+        # Combine with protected NASA-TLX
+        final_dvs = final_physiological + ['NasaCLI']
+        
         if len(final_dvs) != len(dvs):
-            logging.warning(f"Removed correlated variables: {list(set(dvs) - set(final_dvs))}")
+            logging.warning(f"Removed physiological variables: {list(set(dvs) - set(final_dvs))}")
         
         # Apply transformations if needed
         if not all(p >= 0.05 for p in assumptions['normality'].values()):
