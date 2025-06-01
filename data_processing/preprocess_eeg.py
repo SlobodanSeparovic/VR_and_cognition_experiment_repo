@@ -246,8 +246,9 @@ def _ica_cleaning(raw, paths):
     try:
         ic_labels = label_components(raw, ica, method='iclabel')
     
-        # Automatically exclude components not having brain or other in their label
-        auto_excluded = [idx for idx, label in enumerate(ic_labels['labels']) if label.lower() not in ("brain", "other")]
+        # Automatically exclude components not having brain or other in their label with probability >=50% 
+        # for balance between false positives and false negatives classification results
+        auto_excluded = [idx for idx, (label, probs) in enumerate(zip(ic_labels['labels'], ic_labels['y_pred_proba'])) if label.lower() not in ("brain", "other") and np.max(probs) >= 0.5]
     
     except Exception as e:
         print(f"ICLabel Error: {str(e)} - Continuing without component exclusion")
@@ -330,15 +331,7 @@ def _calculate_ptp_percentile(raw, percentile):
     events = make_fixed_length_events(raw, duration=duration, overlap=0.5)
     
     # Create epochs
-    epochs = mne.Epochs(
-        raw,
-        events,
-        tmin=0,
-        tmax=duration,
-        baseline=None,
-        preload=True,
-        verbose=False
-    )
+    epochs = mne.Epochs(raw, events, tmin=0, tmax=duration, baseline=None, preload=True, verbose=False)
     
     # Check if any epochs were created
     if len(epochs) == 0:
