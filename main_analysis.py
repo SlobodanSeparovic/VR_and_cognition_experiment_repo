@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,13 +15,24 @@ from scipy.stats import rankdata
 # Configuration
 BASE_DIR = Path(__file__).parent
 DATA_PATH = BASE_DIR / 'results' / 'final_dataset.csv'
-RESULTS_DIR = BASE_DIR / 'results' / 'MANOVA'
+RESULTS_DIR = BASE_DIR / 'results' / 'statistical_analysis'
 LOG_FILE = RESULTS_DIR / 'analysis.log'
+
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)  # Ensure directory exists for log
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 def initialize_directories():
     """Create required output directories"""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    for subdir in ['assumptions', 'parametric', 'nonparametric', 'visualizations']:
+    for subdir in ['assumptions', 'parametric_MANOVA', 'nonparametric_ANOVA', 'visualizations']:
         (RESULTS_DIR / subdir).mkdir(exist_ok=True)
     logging.info("Analysis directories initialized")
 
@@ -40,16 +53,15 @@ def load_dataset():
     
     return df
 
-def check_repeated_measures_assumptions(data, dvs):
-    """Check of RM-MANOVA assumptions"""
+def check_repeated_measures_assumptions(data, dvs, manova_mode=False):
+    """Check assumptions for MANOVA"""
     assumptions = {
         'normality': {},
         'multicollinearity': None
     }
     
-    # Separate indices
-    subjective_dvs = ['NasaCLI']  # Protected from removal
-    physiological_dvs = [dv for dv in dvs if dv not in subjective_dvs]
+    # Set threshold for MANOVA to 0.7, keep all dependant variables for ANOVA
+    threshold = 0.7 if manova_mode else 1.0
     
     # 1. Normality checks (Shapiro-Wilk per group)
     logging.info("\nChecking normality assumptions...")
@@ -62,13 +74,10 @@ def check_repeated_measures_assumptions(data, dvs):
                 if p < 0.05:
                     logging.warning(f"Normality violated: {dv} in {env}/N{n} (p={p:.4f})")
 
-    # 2. Multicollinearity check (only for physiological indices)
-    if physiological_dvs:
-        corr_matrix = data[physiological_dvs].corr().abs()
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        to_drop = [col for col in upper.columns if any(upper[col] > 0.7)]
-    else:
-        to_drop = []
+    # 2. Multicollinearity check (drops all DVs for MANOVA)
+    corr_matrix = data[dvs].corr().abs()
+    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+    to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
     
     assumptions['multicollinearity'] = to_drop
 
@@ -152,7 +161,7 @@ def run_parametric_manova(data, dvs):
             })
         
         # Save all results
-        pd.DataFrame(results).to_csv(RESULTS_DIR / 'parametric' / 'pillais_results.csv', index=False)
+        pd.DataFrame(results).to_csv(RESULTS_DIR / 'parametric_MANOVA' / 'pillais_results.csv', index=False)
         return len(results) > 0
         
     except Exception as e:
@@ -164,22 +173,19 @@ def run_nonparametric_analysis(data, dvs):
     try:
         results = []
         for dv in dvs:
-            # Create copy to avoid modifying original data
             df = data.copy()
-            
-            # Align and rank data
             aligned = df[dv] - df.groupby('Subject')[dv].transform('mean')
             df['ranked'] = rankdata(aligned)
-            
-            # Fit RM-ANOVA to ranks
             model = pg.rm_anova(data=df, dv='ranked', 
                                within=['Env','N'], 
                                subject='Subject',
                                detailed=True)
+            # Add DV column
+            model['DV'] = dv 
             results.append(model)
-        
-        # Save results
-        pd.concat(results).to_csv(RESULTS_DIR / 'nonparametric' / 'art_results.csv')
+        # Concatenate and reset index before saving
+        pd.concat(results).reset_index(drop=True).to_csv(
+            RESULTS_DIR / 'nonparametric_ANOVA' / 'art_results.csv', index=False)
         return True
     except Exception as e:
         logging.error(f"ART ANOVA failed: {str(e)}")
@@ -187,48 +193,66 @@ def run_nonparametric_analysis(data, dvs):
 
 
 def generate_visualizations(data, dvs):
-    """Create analysis visualizations"""
-    logging.info("\nGenerating diagnostic visualizations...")
-    
-    # Boxplots for each DV
+    """Create analysis visualizations with boxplots and overlaid data points."""
+    custom_palette = ["#377eb8", "#ff7f00"]
+    sns.set_theme(style="whitegrid")
+    sns.set_palette(custom_palette)
+
     for dv in dvs:
-        plt.figure(figsize=(10, 6))
-        sns.boxplot(x='Env', y=dv, hue='N', data=data)
-        plt.title(f"Distribution of {dv} by Condition")
-        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_distribution.png', dpi=300)
+        # Boxplot + Stripplot: Distribution by Env and N
+        plt.figure(figsize=(8, 6), dpi=300)
+        ax = sns.boxplot(
+            x='Env', y=dv, hue='N', data=data, palette=custom_palette, showfliers=True, dodge=True
+        )
+        # Overlay individual data points
+        sns.stripplot(
+            x='Env', y=dv, hue='N', data=data, 
+            palette=custom_palette, dodge=True, jitter=True, 
+            marker='o', alpha=0.7, linewidth=0.5, edgecolor='gray', ax=ax
+        )
+        # Fix legend to avoid double entries
+        handles, labels = ax.get_legend_handles_labels()
+        n_levels = data['N'].nunique()
+        plt.legend(handles[:n_levels], labels[:n_levels], title='N-back', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+        plt.title(f"Distribution of {dv} by Environment and N-back Level", fontsize=14)
+        plt.xlabel("Environment", fontsize=12)
+        plt.ylabel(dv, fontsize=12)
+        plt.tight_layout()
+        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_distribution.png')
         plt.close()
-    
-    # Subject Trend Lineplots
-    for dv in dvs:
-        plt.figure(figsize=(10, 6))
-        sns.lineplot(x='Env', y=dv, hue='Subject', 
-                    data=data, legend=False, alpha=0.3)
-        plt.title(f"{dv} Subject Trends by Environment")
-        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_subject_trends.png', dpi=300)
+
+        # Lineplot: Subject trends by Env
+        plt.figure(figsize=(8, 6), dpi=300)
+        ax = sns.lineplot(x='Env', y=dv, hue='Subject', data=data, legend=False, alpha=0.4, linewidth=1)
+        ax.set_title(f"{dv} Subject Trends by Environment", fontsize=14)
+        ax.set_xlabel("Environment", fontsize=12)
+        ax.set_ylabel(dv, fontsize=12)
+        plt.tight_layout()
+        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_subject_trends.png')
         plt.close()
-    
-    # Interaction plots
-    for dv in dvs:
-        plt.figure(figsize=(10, 6))
-        sns.pointplot(x='Env', y=dv, hue='N', data=data, errorbar=('ci', 95))  # Fixed here
-        plt.title(f"{dv} Interaction Effects")
-        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_interaction.png', dpi=300)
+
+        # Pointplot: Interaction effects
+        plt.figure(figsize=(8, 6), dpi=300)
+        ax = sns.pointplot(
+            x='Env', y=dv, hue='N', data=data, 
+            errorbar=('ci', 95),
+            palette=custom_palette, 
+            markers=["o", "s"], linestyles=["-", "--"], dodge=0.2
+        )
+        ax.set_title(f"{dv} Interaction Effects", fontsize=14)
+        ax.set_xlabel("Environment", fontsize=12)
+        ax.set_ylabel(dv, fontsize=12)
+        plt.legend(title='N-back', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
+        plt.tight_layout()
+        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_interaction.png')
         plt.close()
         
 def main():
     """Main analysis workflow"""
     try:
         # Create directories
-        initialize_directories()        
-        # Configure logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(LOG_FILE),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
+        initialize_directories()
+        # Load data     
         data = load_dataset()
         initial_dvs = ['NasaCLI', 'FTCLI_corrected', 'FTPACLI_corrected',
                       'EngI_corrected', 'F1', 'TotalPress', 'IncorrNo', 'CorrRatio', 'RTCorrAv', 'RTIncorrAv']
@@ -267,9 +291,22 @@ def main():
         
         if parametric_viable:
             logging.info("\n=== Running Parametric Analysis ===")
+
+            # Re-check assumptions with MANOVA-specific threshold
+            manova_assumptions = check_repeated_measures_assumptions(transformed_data, dvs, manova_mode=True)
+
+            # Apply uniform removal for MANOVA
+            final_dvs = [dv for dv in dvs if dv not in manova_assumptions['multicollinearity']]
+
+            if len(final_dvs) != len(dvs):
+                removed = list(set(dvs) - set(final_dvs))
+                logging.warning(f"Removed due to multicollinearity: {removed}")
+
             success = run_parametric_manova(transformed_data, final_dvs)
         else:
+            # Non-parametric path - keep all DVs regardless of correlations
             logging.warning("Assumptions not met - switching to non-parametric")
+            final_dvs = dvs  # Keep all original DVs
             success = run_nonparametric_analysis(transformed_data, final_dvs)
         
         # Generate visualizations
