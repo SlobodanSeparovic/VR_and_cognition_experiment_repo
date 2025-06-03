@@ -10,7 +10,7 @@ import pingouin as pg
 from pathlib import Path
 from scipy import stats
 from statsmodels.multivariate.manova import MANOVA
-from scipy.stats import rankdata
+from scipy.stats import rankdata, boxcox
 
 # Configuration
 BASE_DIR = Path(__file__).parent
@@ -74,7 +74,7 @@ def check_repeated_measures_assumptions(data, dvs, manova_mode=False):
                 if p < 0.05:
                     logging.warning(f"Normality violated: {dv} in {env}/N{n} (p={p:.4f})")
 
-    # 2. Multicollinearity check (drops all DVs for MANOVA)
+    # 2. Multicollinearity check (drops corelated DVs for MANOVA)
     corr_matrix = data[dvs].corr().abs()
     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
     to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
@@ -92,6 +92,7 @@ def apply_transformations(data, dvs):
     """Apply and validate data transformations"""
     transformed = data.copy()
     applied = {}
+    boxcox_lambdas = {}
     
     for dv in dvs:
         original = transformed[dv]
@@ -111,16 +112,26 @@ def apply_transformations(data, dvs):
             'original': original
         }
         
+        # Add Box-Cox only if all values are positive
+        try:
+            boxcox_trans, lambda_ = boxcox(shifted)
+            transforms['boxcox'] = boxcox_trans
+        except Exception as e:
+            logging.info(f"Box-Cox not applied to {dv}: {e}")        
+        
         best_transform = 'original'
         best_p = stats.shapiro(original)[1]
         
         for name, trans in transforms.items():
-            if name == 'original': continue
+            if name == 'original':
+                continue
             _, p = stats.shapiro(trans)
             if p > best_p:
                 best_p = p
                 best_transform = name
                 transformed[dv] = trans
+                if name == 'boxcox':
+                    boxcox_lambdas[dv] = lambda_
         
         if best_transform != 'original':
             logging.info(f"Applied {best_transform} transform to {dv} (p={best_p:.4f})")
@@ -128,7 +139,7 @@ def apply_transformations(data, dvs):
         else:
             logging.info(f"No effective transform found for {dv}")
     
-    return transformed, applied
+    return transformed, applied, boxcox_lambdas
 
 def run_parametric_manova(data, dvs):
     """RM-MANOVA using Pillai's Trace"""
@@ -262,23 +273,31 @@ def main():
         logging.info("\n=== Initial Assumption Check ===")
         assumptions = check_repeated_measures_assumptions(data, dvs)
         
-        # Handle multicollinearity (only physiological indices)
-        physiological_dvs = [dv for dv in dvs if dv != 'NasaCLI']
-        final_physiological = [dv for dv in physiological_dvs 
-                              if dv not in assumptions['multicollinearity']]
-        
-        # Combine with protected NASA-TLX
-        final_dvs = final_physiological + ['NasaCLI']
+        # Remove multicollinearity handling for all DVs
+        final_dvs = [dv for dv in dvs if dv not in assumptions['multicollinearity']]
         
         if len(final_dvs) != len(dvs):
-            logging.warning(f"Removed physiological variables: {list(set(dvs) - set(final_dvs))}")
+            removed = list(set(dvs) - set(final_dvs))
+            logging.warning(f"Removed variables due to multicollinearity: {removed}")
         
         # Apply transformations if needed
         if not all(p >= 0.05 for p in assumptions['normality'].values()):
             logging.info("\n=== Applying Data Transformations ===")
-            transformed_data, transforms = apply_transformations(data, final_dvs)
-            logging.info("Transformations applied: " + ", ".join(
-                [f"{k} ({v})" for k, v in transforms.items()]))
+            transformed_data, transforms, boxcox_lambdas = apply_transformations(data, final_dvs)
+            # Log transformations with lambda values
+            transform_msgs = []
+            for dv, method in transforms.items():
+                if method == 'boxcox':
+                    λ = boxcox_lambdas.get(dv, 'N/A')
+                    transform_msgs.append(f"{dv} ({method}, λ={λ:.2f})")
+                else:
+                    transform_msgs.append(f"{dv} ({method})")
+            logging.info("Transformations applied: " + ", ".join(transform_msgs))
+            
+            # Save λ values to file
+            if boxcox_lambdas:
+                pd.DataFrame.from_dict(boxcox_lambdas, orient='index', columns=['lambda']).to_csv(
+                    RESULTS_DIR / 'assumptions' / 'boxcox_lambdas.csv')
             
             # Recheck assumptions
             logging.info("\n=== Post-Transformation Assumption Check ===")
@@ -293,10 +312,10 @@ def main():
             logging.info("\n=== Running Parametric Analysis ===")
 
             # Re-check assumptions with MANOVA-specific threshold
-            manova_assumptions = check_repeated_measures_assumptions(transformed_data, dvs, manova_mode=True)
+            manova_assumptions = check_repeated_measures_assumptions(transformed_data, final_dvs, manova_mode=True)
 
-            # Apply uniform removal for MANOVA
-            final_dvs = [dv for dv in dvs if dv not in manova_assumptions['multicollinearity']]
+            # Apply uniform removal for MANOVA (use final_dvs, not dvs)
+            final_dvs = [dv for dv in final_dvs if dv not in manova_assumptions['multicollinearity']]
 
             if len(final_dvs) != len(dvs):
                 removed = list(set(dvs) - set(final_dvs))
