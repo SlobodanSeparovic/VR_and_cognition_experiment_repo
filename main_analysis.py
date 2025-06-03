@@ -196,7 +196,7 @@ def run_nonparametric_analysis(data, dvs):
             results.append(model)
         # Concatenate and reset index before saving
         pd.concat(results).reset_index(drop=True).to_csv(
-            RESULTS_DIR / 'nonparametric_ANOVA' / 'art_results.csv', index=False)
+            RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_results.csv', index=False)
         return True
     except Exception as e:
         logging.error(f"ART ANOVA failed: {str(e)}")
@@ -206,7 +206,7 @@ def post_hoc_analysis(data):
     """Perform and save post-hoc analysis for significant ART results"""
     try:
         # Load and prepare ART results
-        art_path = RESULTS_DIR / 'nonparametric_ANOVA' / 'art_results.csv'
+        art_path = RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_results.csv'
         art_results = pd.read_csv(art_path)
         
         # Determine p-value selection based on sphericity (GG corrected or uncorrected)
@@ -272,12 +272,59 @@ def post_hoc_analysis(data):
         # Save outputs
         if posthoc_dfs:
             pd.concat(posthoc_dfs).to_csv(
-                RESULTS_DIR / 'nonparametric_ANOVA' / 'posthoc_results.csv', 
+                RESULTS_DIR / 'nonparametric_ANOVA' / 'post_hoc_results.csv', 
                 index=False
             )
-        with open(RESULTS_DIR / 'analysis_summary.md', 'w') as f:
+        with open(RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_summary.md', 'w') as f:
             f.write('\n\n'.join(summary))
         logging.info(f"Post-hoc analysis completed. {len(significant)} significant effects found.")
+        
+        if posthoc_dfs:
+            posthoc_df = pd.concat(posthoc_dfs)
+            posthoc_df.to_csv(
+                RESULTS_DIR / 'nonparametric_ANOVA' / 'post_hoc_results.csv', 
+                index=False
+            )
+
+            # Generate post-hoc summary
+            posthoc_summary = ["# Post-Hoc Pairwise Comparisons Summary"]
+
+            # Filter for significant and approaching significance
+            sig_mask = posthoc_df['p-corr'] < 0.05
+            approaching_mask = posthoc_df['p-corr'].between(0.05, 0.1)
+            significant = posthoc_df[sig_mask]
+            approaching = posthoc_df[approaching_mask]
+
+            if not significant.empty:
+                posthoc_summary.append("## Statistically Significant Pairwise Comparisons")
+                display_cols = ['Effect', 'DV', 'A', 'B', 'T', 'dof', 'p-corr', 'hedges']
+                posthoc_summary.append(significant[display_cols].rename(
+                    columns={
+                        'A': 'Group 1',
+                        'B': 'Group 2',
+                        'T': 't-value',
+                        'dof': 'df',
+                        'p-corr': 'corrected p',
+                        'hedges': 'Hedges\' g'
+                    }
+                ).to_markdown(index=False))
+
+            if not approaching.empty:
+                posthoc_summary.append("## Pairwise Comparisons Approaching Significance")
+                posthoc_summary.append(approaching[display_cols].rename(
+                    columns={
+                        'A': 'Group 1',
+                        'B': 'Group 2',
+                        'T': 't-value',
+                        'dof': 'df',
+                        'p-corr': 'corrected p',
+                        'hedges': 'Hedges\' g'
+                    }
+                ).to_markdown(index=False))
+
+            with open(RESULTS_DIR / 'nonparametric_ANOVA' / 'post_hoc_summary.md', 'w') as f:
+                f.write('\n\n'.join(posthoc_summary))
+                
     except Exception as e:
         logging.error(f"Post-hoc analysis failed: {str(e)}")
         raise
