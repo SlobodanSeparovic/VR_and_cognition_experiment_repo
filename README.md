@@ -1,7 +1,7 @@
 # VR and cognition experiment data processing pipeline
 
 # Structure
-'''
+```
 VR_and_cognition_experiment/
 ├── config/
 │   └── paths.py
@@ -24,7 +24,7 @@ VR_and_cognition_experiment/
 ├── README.md
 ├── requirements.txt
 └── settings.ini
-'''
+```
 
 # Background
 This is the data processing pipeline for the data recorded using the experimental setup stated below. The core idea of the experiment was to explore if and how different environments (control, nature and urban) may pose different level of cognitive strain on participants. The results are meant to inform the chioce of different environments in post-stroke rehabilitation using virtual-reality headsets.
