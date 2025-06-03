@@ -17,8 +17,9 @@ VR_and_cognition_experiment/
 │   ├── random_seqs.csv
 │   ├── randomization.py
 ├── .gitignore
-├── main_data_correction.py
-├── main.py
+├── main_analysis.py
+├── main_correction.py
+├── main_preprocessing.py
 ├── README.md
 ├── requirements.txt
 └── settings.ini
