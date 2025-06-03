@@ -201,6 +201,88 @@ def run_nonparametric_analysis(data, dvs):
     except Exception as e:
         logging.error(f"ART ANOVA failed: {str(e)}")
         return False
+    
+def post_hoc_analysis(data):
+    """Perform and save post-hoc analysis for significant ART results"""
+    try:
+        # Load and prepare ART results
+        art_path = RESULTS_DIR / 'nonparametric_ANOVA' / 'art_results.csv'
+        art_results = pd.read_csv(art_path)
+        
+        # Determine p-value selection based on sphericity (GG corrected or uncorrected)
+        sphericity_thresh = 0.75
+        use_gg = art_results['eps'] < sphericity_thresh
+        art_results['p_selected'] = np.where(use_gg, art_results['p-GG-corr'], art_results['p-unc'])
+        art_results['p_used'] = np.where(use_gg, 'GG-corrected', 'Uncorrected')
+        
+        # Identify significant results and those approaching significance
+        sig_thresh = 0.05
+        approaching_thresh = 0.1
+        sig_mask = art_results['p_selected'] < sig_thresh
+        approaching_mask = art_results['p_selected'].between(sig_thresh, approaching_thresh)
+        
+        significant = art_results[sig_mask].copy()
+        approaching = art_results[approaching_mask].copy()
+        
+        # Generate summary report
+        summary = [
+            "# Aligned Ranks Transformation (ART) ANOVA Results Summary",
+            f"Significance thresholds: p < {sig_thresh} (significant), p < {approaching_thresh} (approaching)"
+        ]
+        
+        if not significant.empty:
+            summary.append("## Statistically Significant Findings")
+            sig_display = significant[['Source', 'DV', 'F', 'p_selected', 'ng2', 'p_used']].rename(
+                columns={
+                    'p_selected': 'p',
+                    'p_used': 'Correction',
+                    'ng2': 'effect size ng2'
+                }
+            )
+            summary.append(sig_display.to_markdown(index=False))
+        
+        if not approaching.empty:
+            summary.append("## Findings Approaching Significance")
+            appr_display = approaching[['Source', 'DV', 'F', 'p_selected', 'ng2', 'p_used']].rename(
+                columns={
+                    'p_selected': 'p',
+                    'p_used': 'Correction',
+                    'ng2': 'effect size ng2'
+                }
+            )
+            summary.append(appr_display.to_markdown(index=False))
+        
+        # Post-hoc analysis
+        posthoc_dfs = []
+        for _, row in significant.iterrows():
+            dv = row['DV']
+            effect = row['Source']
+            factors = effect.split(' * ') if '*' in effect else [effect]
+            try:
+                comparisons = pg.pairwise_tests(
+                    data=data, dv=dv, within=factors, subject='Subject', padjust='holm'
+                )
+                comparisons['ART_p'] = row['p_selected']
+                comparisons['Effect'] = effect
+                comparisons['DV'] = dv
+                posthoc_dfs.append(comparisons)
+            except Exception as e:
+                logging.warning(f"Failed posthoc for {effect} on {dv}: {str(e)}")
+        
+        # Save outputs
+        if posthoc_dfs:
+            pd.concat(posthoc_dfs).to_csv(
+                RESULTS_DIR / 'nonparametric_ANOVA' / 'posthoc_results.csv', 
+                index=False
+            )
+        with open(RESULTS_DIR / 'analysis_summary.md', 'w') as f:
+            f.write('\n\n'.join(summary))
+        logging.info(f"Post-hoc analysis completed. {len(significant)} significant effects found.")
+    except Exception as e:
+        logging.error(f"Post-hoc analysis failed: {str(e)}")
+        raise
+
+
 
 
 def generate_visualizations(data, dvs):
@@ -288,13 +370,13 @@ def main():
             transform_msgs = []
             for dv, method in transforms.items():
                 if method == 'boxcox':
-                    λ = boxcox_lambdas.get(dv, 'N/A')
-                    transform_msgs.append(f"{dv} ({method}, λ={λ:.2f})")
+                    lambd = boxcox_lambdas.get(dv, 'N/A')
+                    transform_msgs.append(f"{dv} ({method}, lambda={lambd:.2f})")
                 else:
                     transform_msgs.append(f"{dv} ({method})")
             logging.info("Transformations applied: " + ", ".join(transform_msgs))
             
-            # Save λ values to file
+            # Save lambda values to file
             if boxcox_lambdas:
                 pd.DataFrame.from_dict(boxcox_lambdas, orient='index', columns=['lambda']).to_csv(
                     RESULTS_DIR / 'assumptions' / 'boxcox_lambdas.csv')
@@ -327,6 +409,9 @@ def main():
             logging.warning("Assumptions not met - switching to non-parametric")
             final_dvs = dvs  # Keep all original DVs
             success = run_nonparametric_analysis(transformed_data, final_dvs)
+            # Add post-hoc analysis
+            if success:
+                post_hoc_analysis(transformed_data)
         
         # Generate visualizations
         if success:
