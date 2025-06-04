@@ -1,5 +1,6 @@
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="pingouin.multivariate", message="divide by zero encountered in log")
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -11,6 +12,9 @@ from pathlib import Path
 from scipy import stats
 from statsmodels.multivariate.manova import MANOVA
 from scipy.stats import rankdata, boxcox
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # Configuration
 BASE_DIR = Path(__file__).parent
@@ -53,40 +57,86 @@ def load_dataset():
     
     return df
 
-def check_repeated_measures_assumptions(data, dvs, manova_mode=False):
-    """Check assumptions for MANOVA"""
+def check_manova_assumptions(data, dvs):
+    """Check MANOVA-specific assumptions with numerical stability"""
     assumptions = {
-        'normality': {},
-        'multicollinearity': None
+        'multivariate_normality': None,
+        'homogeneity_covariance': None,
+        'valid_dvs': []
     }
     
-    # Set threshold for MANOVA to 0.7, keep all dependant variables for ANOVA
-    threshold = 0.7 if manova_mode else 1.0
+    if len(dvs) < 2:
+        return assumptions
     
-    # 1. Normality checks (Shapiro-Wilk per group)
-    logging.info("\nChecking normality assumptions...")
-    for dv in dvs:
-        for env in data['Env'].unique():
-            for n in data['N'].unique():
-                subset = data[(data['Env'] == env) & (data['N'] == n)][dv]
-                _, p = stats.shapiro(subset)
-                assumptions['normality'][(dv, env, n)] = p
-                if p < 0.05:
-                    logging.warning(f"Normality violated: {dv} in {env}/N{n} (p={p:.4f})")
+    try:
+        # Create assumptions directory
+        (RESULTS_DIR / 'assumptions').mkdir(exist_ok=True)
+        
+        # Start Markdown report
+        report = ["# MANOVA Assumption Checks\n"]
+        
+        # 1. Filter DVs with insufficient variation
+        valid_dvs = [dv for dv in dvs if np.var(data[dv]) > 1e-6]
+        report.append(f"## Initial DV Filtering\n- Removed DVs with variance ≤1e-6: {list(set(dvs)-set(valid_dvs)) or 'None'}")
+        
+        # 2. Check for rank deficiency
+        X = data[valid_dvs].values
+        matrix_rank = np.linalg.matrix_rank(X)
+        if matrix_rank < len(valid_dvs):
+            logging.warning("Rank-deficient matrix detected")
+            report.append(f"## Rank Check\n- **FAILED**: Matrix rank ({matrix_rank}) < number of DVs ({len(valid_dvs)})")
+            with open(RESULTS_DIR / 'assumptions' / 'manova_assumptions.md', 'w') as f:
+                f.write('\n'.join(report))
+            return assumptions
+            
+        # 3. Check covariance matrix conditioning
+        cov_matrix = np.cov(X, rowvar=False)
+        cond_number = np.linalg.cond(cov_matrix)
+        report.append(f"## Covariance Matrix Check\n- Condition number: {cond_number:.2e}")
+        
+        if cond_number > 1e12:
+            logging.warning(f"Ill-conditioned covariance matrix (cond={cond_number:.2e})")
+            report.append("- **FAILED**: Condition number >1e12 (indicates numerical instability)")
+            with open(RESULTS_DIR / 'assumptions' / 'manova_assumptions.md', 'w') as f:
+                f.write('\n'.join(report))
+            return assumptions
 
-    # 2. Multicollinearity check (drops corelated DVs for MANOVA)
-    corr_matrix = data[dvs].corr().abs()
-    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-    to_drop = [col for col in upper.columns if any(upper[col] > threshold)]
-    
-    assumptions['multicollinearity'] = to_drop
+        # 4. Multivariate normality test
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                result = pg.multivariate_normality(X)
+                assumptions['multivariate_normality'] = result.pval
+                report.append(f"## Normality Check\n- Henze-Zirkler p-value: {result.pval:.4f}")
+            except Exception as e:
+                logging.error(f"Normality test failed: {str(e)}")
+                report.append("## Normality Check\n- **FAILED**: Could not compute")
+                assumptions['multivariate_normality'] = None
 
-    # Save assumption checks
-    pd.DataFrame(assumptions['normality'], index=['p-value']).T.to_csv(
-        RESULTS_DIR / 'assumptions' / 'normality_check.csv')
-    corr_matrix.to_csv(RESULTS_DIR / 'assumptions' / 'correlation_matrix.csv')
+        # 5. Homogeneity of covariance matrices
+        try:
+            data = data.copy()
+            data['group'] = data['Env'] + '_' + data['N'].astype(str)
+            box_result = pg.box_m(data, dvs=valid_dvs, group='group')
+            assumptions['homogeneity_covariance'] = box_result['pval'].item()
+            report.append(f"## Covariance Homogeneity\n- Box's M p-value: {box_result['pval'].item():.4f}")
+        except Exception as e:
+            logging.warning(f"Box's M test failed: {str(e)}")
+            report.append("## Covariance Homogeneity\n- **FAILED**: Could not compute")
+            assumptions['homogeneity_covariance'] = None
+
+        # Save full report
+        assumptions['valid_dvs'] = valid_dvs
+        report.append(f"\n## Final Eligibility\n- Valid DVs: {valid_dvs or 'None'}")
+        
+        with open(RESULTS_DIR / 'assumptions' / 'manova_assumptions.md', 'w', encoding='utf-8') as f:
+            f.write('\n'.join(report))
+
+    except Exception as e:
+        logging.error(f"Assumption check failed: {str(e)}")
     
     return assumptions
+
 
 def apply_transformations(data, dvs):
     """Apply and validate data transformations"""
@@ -185,12 +235,10 @@ def run_nonparametric_analysis(data, dvs):
         results = []
         for dv in dvs:
             df = data.copy()
+            # Remove parametric assumption checks
             aligned = df[dv] - df.groupby('Subject')[dv].transform('mean')
             df['ranked'] = rankdata(aligned)
-            model = pg.rm_anova(data=df, dv='ranked', 
-                               within=['Env','N'], 
-                               subject='Subject',
-                               detailed=True)
+            model = pg.rm_anova(data=df, dv='ranked', within=['Env','N'], subject='Subject')
             # Add DV column
             model['DV'] = dv 
             results.append(model)
@@ -329,144 +377,127 @@ def post_hoc_analysis(data):
         logging.error(f"Post-hoc analysis failed: {str(e)}")
         raise
 
+def save_assumption_reports(manova_assumptions, manova_dvs, art_dvs):
+    """Save detailed assumption reports with numerical data"""
+    assumption_dir = RESULTS_DIR / 'assumptions'
+    assumption_dir.mkdir(exist_ok=True)
 
+    # Prepare the manova_dvs string
+    if manova_dvs:
+        manova_dvs_str = '\n'.join(f'- {dv}' for dv in manova_dvs)
+    else:
+        manova_dvs_str = '*None*'
 
+    # Prepare the art_dvs string
+    art_dvs_str = '\n'.join(f'- {dv}' for dv in art_dvs)
 
-def generate_visualizations(data, dvs):
-    """Create analysis visualizations with boxplots and overlaid data points."""
-    custom_palette = ["#377eb8", "#ff7f00"]
-    sns.set_theme(style="whitegrid")
-    sns.set_palette(custom_palette)
+    # 1. Human-readable summary
+    with open(assumption_dir / 'assumption_summary.md', 'w', encoding='utf-8') as f:
+        f.write('\n\n'.join([
+            "# Statistical Analysis Assumption Reports",
+            "## MANOVA Eligibility",
+            f"- **Multivariate normality p-value**: {manova_assumptions['multivariate_normality']:.4f}",
+            f"- **Homogeneity of covariance p-value**: {manova_assumptions['homogeneity_covariance']:.4f}",
+            "### Eligible DVs for MANOVA:",
+            manova_dvs_str,
+            "## ART ANOVA Coverage",
+            "### All Analyzed DVs:",
+            art_dvs_str
+        ]))
 
+    # 2. Save raw numerical data
+    pd.DataFrame({
+        'check': ['multivariate_normality', 'homogeneity_covariance'],
+        'p_value': [manova_assumptions['multivariate_normality'], 
+                   manova_assumptions['homogeneity_covariance']]
+    }).to_csv(assumption_dir / 'manova_assumption_values.csv', index=False)
+
+def generate_visualizations(data, dvs, analysis_type):
+    """Generate analysis-specific visualizations"""
+    viz_dir = RESULTS_DIR / 'visualizations' / analysis_type.replace(' ', '_')
+    viz_dir.mkdir(exist_ok=True, parents=True)
+    
     for dv in dvs:
-        # Boxplot + Stripplot: Distribution by Env and N
-        plt.figure(figsize=(8, 6), dpi=300)
-        ax = sns.boxplot(
-            x='Env', y=dv, hue='N', data=data, palette=custom_palette, showfliers=True, dodge=True
-        )
-        # Overlay individual data points
-        sns.stripplot(
-            x='Env', y=dv, hue='N', data=data, 
-            palette=custom_palette, dodge=True, jitter=True, 
-            marker='o', alpha=0.7, linewidth=0.5, edgecolor='gray', ax=ax
-        )
-        # Fix legend to avoid double entries
-        handles, labels = ax.get_legend_handles_labels()
-        n_levels = data['N'].nunique()
-        plt.legend(handles[:n_levels], labels[:n_levels], title='N-back', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-        plt.title(f"Distribution of {dv} by Environment and N-back Level", fontsize=14)
-        plt.xlabel("Environment", fontsize=12)
-        plt.ylabel(dv, fontsize=12)
-        plt.tight_layout()
-        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_distribution.png')
-        plt.close()
-
-        # Lineplot: Subject trends by Env
-        plt.figure(figsize=(8, 6), dpi=300)
-        ax = sns.lineplot(x='Env', y=dv, hue='Subject', data=data, legend=False, alpha=0.4, linewidth=1)
-        ax.set_title(f"{dv} Subject Trends by Environment", fontsize=14)
-        ax.set_xlabel("Environment", fontsize=12)
-        ax.set_ylabel(dv, fontsize=12)
-        plt.tight_layout()
-        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_subject_trends.png')
-        plt.close()
-
-        # Pointplot: Interaction effects
-        plt.figure(figsize=(8, 6), dpi=300)
-        ax = sns.pointplot(
-            x='Env', y=dv, hue='N', data=data, 
-            errorbar=('ci', 95),
-            palette=custom_palette, 
-            markers=["o", "s"], linestyles=["-", "--"], dodge=0.2
-        )
-        ax.set_title(f"{dv} Interaction Effects", fontsize=14)
-        ax.set_xlabel("Environment", fontsize=12)
-        ax.set_ylabel(dv, fontsize=12)
-        plt.legend(title='N-back', bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-        plt.tight_layout()
-        plt.savefig(RESULTS_DIR / 'visualizations' / f'{dv}_interaction.png')
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(x='Env', y=dv, hue='N', data=data)
+        plt.title(f"{analysis_type} - {dv} Distribution by Environment and Task Difficulty")
+        plt.savefig(viz_dir / f"{dv}_distribution.png")
         plt.close()
         
 def main():
-    """Main analysis workflow"""
+    """Main analysis workflow with parallel parametric/nonparametric paths"""
     try:
-        # Create directories
         initialize_directories()
-        # Load data     
         data = load_dataset()
         initial_dvs = ['NasaCLI', 'FTCLI_corrected', 'FTPACLI_corrected',
-                      'EngI_corrected', 'F1', 'TotalPress', 'IncorrNo', 'CorrRatio', 'RTCorrAv', 'RTIncorrAv']
+                      'EngI_corrected', 'F1', 'TotalPress', 'IncorrNo', 
+                      'CorrRatio', 'RTCorrAv', 'RTIncorrAv']
         dvs = [col for col in initial_dvs if col in data.columns]
         
-        # Initial assumption check
-        logging.info("\n=== Initial Assumption Check ===")
-        assumptions = check_repeated_measures_assumptions(data, dvs)
+        # ===== Parametric Path =====
+        # Apply transformations
+        logging.info("\n=== Applying Data Transformations ===")
+        transformed_data, transforms, boxcox_lambdas = apply_transformations(data, dvs)
+        # Save transformation details
+        df = pd.DataFrame({
+            'DV': list(transforms.keys()),
+            'Transform': list(transforms.values()),
+            'BoxCox_Lambda': [boxcox_lambdas.get(dv, np.nan) for dv in transforms.keys()]
+        })
+        df.to_csv(RESULTS_DIR / 'assumptions' / 'data_transformations.csv', index=False)
         
-        # Remove multicollinearity handling for all DVs
-        final_dvs = [dv for dv in dvs if dv not in assumptions['multicollinearity']]
-        
-        if len(final_dvs) != len(dvs):
-            removed = list(set(dvs) - set(final_dvs))
-            logging.warning(f"Removed variables due to multicollinearity: {removed}")
-        
-        # Apply transformations if needed
-        if not all(p >= 0.05 for p in assumptions['normality'].values()):
-            logging.info("\n=== Applying Data Transformations ===")
-            transformed_data, transforms, boxcox_lambdas = apply_transformations(data, final_dvs)
-            # Log transformations with lambda values
-            transform_msgs = []
-            for dv, method in transforms.items():
-                if method == 'boxcox':
-                    lambd = boxcox_lambdas.get(dv, 'N/A')
-                    transform_msgs.append(f"{dv} ({method}, lambda={lambd:.2f})")
-                else:
-                    transform_msgs.append(f"{dv} ({method})")
-            logging.info("Transformations applied: " + ", ".join(transform_msgs))
-            
-            # Save lambda values to file
-            if boxcox_lambdas:
-                pd.DataFrame.from_dict(boxcox_lambdas, orient='index', columns=['lambda']).to_csv(
-                    RESULTS_DIR / 'assumptions' / 'boxcox_lambdas.csv')
-            
-            # Recheck assumptions
-            logging.info("\n=== Post-Transformation Assumption Check ===")
-            assumptions = check_repeated_measures_assumptions(transformed_data, final_dvs)
+        if len(dvs) >= 2:
+            logging.info("\n=== Checking MANOVA Assumptions ===")
+            manova_assumptions = check_manova_assumptions(transformed_data, dvs)
+            manova_dvs = [
+                dv for dv in manova_assumptions['valid_dvs']
+                if (manova_assumptions['multivariate_normality'] is not None
+                    and manova_assumptions['homogeneity_covariance'] is not None
+                    and manova_assumptions['multivariate_normality'] >= 0.05
+                    and manova_assumptions['homogeneity_covariance'] >= 0.001)
+            ]
         else:
-            transformed_data = data.copy()
+            manova_dvs = []
         
-        # Determine analysis path
-        parametric_viable = all(p >= 0.05 for p in assumptions['normality'].values())
+        # Remove multicollinear DVs
+        if manova_dvs:
+            corr_matrix = transformed_data[manova_dvs].corr().abs()
+            upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+            manova_dvs = [col for col in manova_dvs if not any(upper[col] > 0.7)]
+
+        # ===== Nonparametric Path =====
+        # Always use all DVs with original data
+        art_dvs = dvs.copy()
         
-        if parametric_viable:
-            logging.info("\n=== Running Parametric Analysis ===")
-
-            # Re-check assumptions with MANOVA-specific threshold
-            manova_assumptions = check_repeated_measures_assumptions(transformed_data, final_dvs, manova_mode=True)
-
-            # Apply uniform removal for MANOVA (use final_dvs, not dvs)
-            final_dvs = [dv for dv in final_dvs if dv not in manova_assumptions['multicollinearity']]
-
-            if len(final_dvs) != len(dvs):
-                removed = list(set(dvs) - set(final_dvs))
-                logging.warning(f"Removed due to multicollinearity: {removed}")
-
-            success = run_parametric_manova(transformed_data, final_dvs)
+        # ===== Run Analyses =====
+        manova_success = False
+        art_success = False
+        
+        # Parametric MANOVA
+        if manova_dvs:
+            logging.info(f"\n=== Running MANOVA on: {', '.join(manova_dvs)} ===")
+            manova_success = run_parametric_manova(transformed_data, manova_dvs)
+            generate_visualizations(transformed_data, manova_dvs, 'MANOVA')
         else:
-            # Non-parametric path - keep all DVs regardless of correlations
-            logging.warning("Assumptions not met - switching to non-parametric")
-            final_dvs = dvs  # Keep all original DVs
-            success = run_nonparametric_analysis(transformed_data, final_dvs)
-            # Add post-hoc analysis
-            if success:
-                post_hoc_analysis(transformed_data)
+            logging.warning("\n=== No DVs meet MANOVA assumptions - skipping parametric analysis ===")
         
-        # Generate visualizations
-        if success:
-            generate_visualizations(transformed_data, final_dvs)
-            logging.info("\nANALYSIS COMPLETED SUCCESSFULLY")
-        else:
-            logging.error("Analysis failed to complete")
+        # Nonparametric ART ANOVA (always runs)
+        logging.info(f"\n=== Running ART ANOVA on all DVs: {', '.join(art_dvs)} ===")
+        art_success = run_nonparametric_analysis(data.copy(), art_dvs)  # Original data
+        generate_visualizations(data, art_dvs, 'ART ANOVA')
+        
+        # Post-hoc analyses
+        if manova_success:
+            logging.info("\n=== MANOVA Post-hoc Analysis ===")
+            # Add MANOVA post-hoc implementation here
             
+        if art_success:
+            logging.info("\n=== ART ANOVA Post-hoc Analysis ===")
+            post_hoc_analysis(data.copy())  # Original data
+
+        # Save comprehensive reports
+        save_assumption_reports(manova_assumptions, manova_dvs, art_dvs)
+        
     except Exception as e:
         logging.critical(f"Critical pipeline error: {str(e)}")
         sys.exit(1)
