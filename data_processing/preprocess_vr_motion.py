@@ -104,7 +104,7 @@ def _flag_artifacts(df, thresholds, buffer):
     
     # Initial asymmetric buffer (handled separately as no buffer needs to be added to it later)
     start_time = df['Timestamp'].min()
-    initial_end = start_time + (buffer * 0.75)
+    initial_end = start_time + (buffer * 0.8)
     initial_mask = (df['Timestamp'] >= start_time) & (df['Timestamp'] <= initial_end)
 
     # Motion/trigger artifacts (exclude initial buffer from this logic)
@@ -127,7 +127,7 @@ def _flag_artifacts(df, thresholds, buffer):
     artifact_times = df[other_artifacts]['Timestamp']
     buffered_other_artifacts = pd.Series(False, index=df.index)
     for t in artifact_times:
-        buffered_other_artifacts |= (df['Timestamp'] >= t - (buffer * 0.25)) & (df['Timestamp'] <= t + (buffer * 0.75))
+        buffered_other_artifacts |= (df['Timestamp'] >= t - (buffer * 0.2)) & (df['Timestamp'] <= t + (buffer * 0.8))
     
     # Combine masks (initial buffer + other buffered artifacts)
     df['MotionArtifact'] = initial_mask | buffered_other_artifacts
