@@ -1,7 +1,7 @@
 import os
 import re
 from pathlib import Path
-from main import main_single
+from main_preprocessing import main_single
 
 def process_directory(directory):
     """Process all XDF files in the directory"""
