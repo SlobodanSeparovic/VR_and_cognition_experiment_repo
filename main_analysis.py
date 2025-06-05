@@ -70,6 +70,9 @@ def check_manova_assumptions(data, dvs, group_var='Subject'):
         'correlation_check': {dv: [] for dv in dvs}
     }
     
+    # Remove duplicates
+    dvs = list(set(dvs))
+    
     # 1. Matrix Rank Check (handle missing data properly)
     try:
         wide_data = data.pivot_table(index=group_var, columns=['Env', 'N'], values=dvs)
@@ -384,7 +387,8 @@ def main():
                 if f1_correlates:
                     logging.info(f"Removing F1-correlated DVs: {', '.join(f1_correlates)}")
                     clean_dvs = [dv for dv in clean_dvs if dv not in f1_correlates]
-                    clean_dvs.append('F1')  # Ensure F1 is retained
+                    if 'F1' not in clean_dvs:  # Prevent duplicates
+                        clean_dvs.append('F1')
             
             # 2. Remove other highly correlated DVs
             for dv in initial_assumptions['correlation_check']:
