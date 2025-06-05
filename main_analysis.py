@@ -1,6 +1,6 @@
 import warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=RuntimeWarning, module="pingouin.multivariate", message="divide by zero encountered in log")
+warnings.filterwarnings(action="ignore", category=FutureWarning)
+warnings.filterwarnings(action='ignore', message='invalid value encountered in power', category=RuntimeWarning, module='pingouin.multivariate')
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,9 +9,10 @@ import logging
 import sys
 import pingouin as pg
 from pathlib import Path
-from scipy import stats
 from statsmodels.multivariate.manova import MANOVA
-from scipy.stats import rankdata, boxcox
+from sklearn.preprocessing import PowerTransformer
+from scipy.stats import rankdata, boxcox, anderson
+from pingouin import sphericity
 import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -57,84 +58,72 @@ def load_dataset():
     
     return df
 
-def check_manova_assumptions(data, dvs):
-    """Check MANOVA-specific assumptions with numerical stability"""
+
+def check_manova_assumptions(data, dvs, group_var='Subject'):
+    """Checks MANOVA assumptions for repeated measures data."""
     assumptions = {
+        'valid_dvs': [],
+        'matrix_rank': None,
+        'condition_number': None,
         'multivariate_normality': None,
-        'homogeneity_covariance': None,
-        'valid_dvs': []
+        'sphericity': {},
+        'correlation_check': {dv: [] for dv in dvs}
     }
     
-    if len(dvs) < 2:
-        return assumptions
-    
+    # 1. Matrix Rank Check (handle missing data properly)
     try:
-        # Create assumptions directory
-        (RESULTS_DIR / 'assumptions').mkdir(exist_ok=True)
-        
-        # Start Markdown report
-        report = ["# MANOVA Assumption Checks\n"]
-        
-        # 1. Filter DVs with insufficient variation
-        valid_dvs = [dv for dv in dvs if np.var(data[dv]) > 1e-6]
-        report.append(f"## Initial DV Filtering\n- Removed DVs with variance ≤1e-6: {list(set(dvs)-set(valid_dvs)) or 'None'}")
-        
-        # 2. Check for rank deficiency
-        X = data[valid_dvs].values
-        matrix_rank = np.linalg.matrix_rank(X)
-        if matrix_rank < len(valid_dvs):
-            logging.warning("Rank-deficient matrix detected")
-            report.append(f"## Rank Check\n- **FAILED**: Matrix rank ({matrix_rank}) < number of DVs ({len(valid_dvs)})")
-            with open(RESULTS_DIR / 'assumptions' / 'manova_assumptions.md', 'w') as f:
-                f.write('\n'.join(report))
-            return assumptions
-            
-        # 3. Check covariance matrix conditioning
-        cov_matrix = np.cov(X, rowvar=False)
-        cond_number = np.linalg.cond(cov_matrix)
-        report.append(f"## Covariance Matrix Check\n- Condition number: {cond_number:.2e}")
-        
-        if cond_number > 1e12:
-            logging.warning(f"Ill-conditioned covariance matrix (cond={cond_number:.2e})")
-            report.append("- **FAILED**: Condition number >1e12 (indicates numerical instability)")
-            with open(RESULTS_DIR / 'assumptions' / 'manova_assumptions.md', 'w') as f:
-                f.write('\n'.join(report))
-            return assumptions
-
-        # 4. Multivariate normality test
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", RuntimeWarning)
-            try:
-                result = pg.multivariate_normality(X)
-                assumptions['multivariate_normality'] = result.pval
-                report.append(f"## Normality Check\n- Henze-Zirkler p-value: {result.pval:.4f}")
-            except Exception as e:
-                logging.error(f"Normality test failed: {str(e)}")
-                report.append("## Normality Check\n- **FAILED**: Could not compute")
-                assumptions['multivariate_normality'] = None
-
-        # 5. Homogeneity of covariance matrices
-        try:
-            data = data.copy()
-            data['group'] = data['Env'] + '_' + data['N'].astype(str)
-            box_result = pg.box_m(data, dvs=valid_dvs, group='group')
-            assumptions['homogeneity_covariance'] = box_result['pval'].item()
-            report.append(f"## Covariance Homogeneity\n- Box's M p-value: {box_result['pval'].item():.4f}")
-        except Exception as e:
-            logging.warning(f"Box's M test failed: {str(e)}")
-            report.append("## Covariance Homogeneity\n- **FAILED**: Could not compute")
-            assumptions['homogeneity_covariance'] = None
-
-        # Save full report
-        assumptions['valid_dvs'] = valid_dvs
-        report.append(f"\n## Final Eligibility\n- Valid DVs: {valid_dvs or 'None'}")
-        
-        with open(RESULTS_DIR / 'assumptions' / 'manova_assumptions.md', 'w', encoding='utf-8') as f:
-            f.write('\n'.join(report))
-
+        wide_data = data.pivot_table(index=group_var, columns=['Env', 'N'], values=dvs)
+        wide_data = wide_data.dropna(axis=1, how='all').fillna(0)  # Improved handling
+        assumptions['matrix_rank'] = np.linalg.matrix_rank(wide_data)
     except Exception as e:
-        logging.error(f"Assumption check failed: {str(e)}")
-    
+        logging.error(f"Matrix rank check failed: {str(e)}")
+        assumptions['matrix_rank'] = 0
+
+    # 2. Multicollinearity Check (use correlation matrix)
+    corr_matrix = data[dvs].corr().values
+    assumptions['condition_number'] = np.linalg.cond(corr_matrix)  # More standard approach
+
+    # 3. Multivariate Normality (Henze-Zirkler Test)
+    try:
+        hz_test = pg.multivariate_normality(data[dvs], alpha=0.05)  # Standard alpha
+        assumptions['multivariate_normality'] = hz_test.pval >= 0.05
+    except Exception as e:
+        logging.error(f"Multivariate normality check failed: {str(e)}")
+        assumptions['multivariate_normality'] = False
+
+    # 4. Sphericity Checks (Mauchly's Test)
+    for effect in [['Env'], ['N'], ['Env', 'N']]:
+        effect_name = 'x'.join(effect)
+        try:
+            spher, W, chi2, dof, mauchly_p = pg.sphericity(data, dv=dvs[0], subject=group_var, within=effect)
+            assumptions['sphericity'][effect_name] = {
+                'pval': mauchly_p,
+                'W': W,
+                'chi2': chi2,
+                'dof': dof
+            }
+        except Exception as e:
+            logging.error(f"Sphericity check for {effect_name} failed: {str(e)}")
+            assumptions['sphericity'][effect_name] = {'pval': 0.0}  # Store as dict
+
+    # 5. Correlation Check (fixed and validated)
+    corr_matrix = data[dvs].corr().abs()
+    high_corr_pairs = []
+    for i in range(len(dvs)):
+        for j in range(i+1, len(dvs)):
+            if corr_matrix.iloc[i, j] > 0.8:
+                high_corr_pairs.append((dvs[i], dvs[j]))
+    for dv1, dv2 in high_corr_pairs:
+        assumptions['correlation_check'][dv1].append(dv2)
+        assumptions['correlation_check'][dv2].append(dv1)
+
+    # Final Validation (All DVs Together)
+    assumptions['valid_dvs'] = dvs if (
+        assumptions['multivariate_normality'] and
+        all(v['pval'] >= 0.01 for v in assumptions['sphericity'].values()) and  # Access 'pval'
+        assumptions['condition_number'] < 30
+    ) else []
+
     return assumptions
 
 
@@ -143,77 +132,72 @@ def apply_transformations(data, dvs):
     transformed = data.copy()
     applied = {}
     boxcox_lambdas = {}
-    
+    ad_stats = {}
+    ad_criticals = {}
+
     for dv in dvs:
         original = transformed[dv]
-        
-        # Handle non-positive values
         if (original <= 0).any():
             shifted = original + abs(original.min()) + 1e-6
             logging.info(f"Applied value shift to {dv}")
         else:
             shifted = original.copy()
-        
-        # Test transformation effectiveness
-        transforms = {
-            'log': np.log(shifted),
-            'sqrt': np.sqrt(shifted),
-            'cube_root': np.cbrt(shifted),
-            'original': original
-        }
-        
-        # Add Box-Cox only if all values are positive
+
+        transforms = {}
+        yeo = PowerTransformer(method='yeo-johnson').fit_transform(shifted.values.reshape(-1,1))
+        transforms['yeo_johnson'] = yeo.flatten()
         try:
             boxcox_trans, lambda_ = boxcox(shifted)
             transforms['boxcox'] = boxcox_trans
+            boxcox_lambdas[dv] = lambda_
         except Exception as e:
             logging.info(f"Box-Cox not applied to {dv}: {e}")        
-        
+
         best_transform = 'original'
-        best_p = stats.shapiro(original)[1]
-        
+        best_stat = anderson(original).statistic
+        best_critical = anderson(original).critical_values[2]  # 5% level
+
         for name, trans in transforms.items():
-            if name == 'original':
-                continue
-            _, p = stats.shapiro(trans)
-            if p > best_p:
-                best_p = p
+            result = anderson(trans)
+            stat = result.statistic
+            critical = result.critical_values[2]
+            if stat < best_stat:
+                best_stat = stat
                 best_transform = name
-                transformed[dv] = trans
-                if name == 'boxcox':
-                    boxcox_lambdas[dv] = lambda_
-        
+                best_critical = critical
+
         if best_transform != 'original':
-            logging.info(f"Applied {best_transform} transform to {dv} (p={best_p:.4f})")
+            transformed[dv] = transforms[best_transform]
+            logging.info(f"Applied {best_transform} transform to {dv} (stat={best_stat:.4f})")
             applied[dv] = best_transform
         else:
             logging.info(f"No effective transform found for {dv}")
-    
-    return transformed, applied, boxcox_lambdas
+            applied[dv] = 'original'
+
+        ad_stats[dv] = best_stat
+        ad_criticals[dv] = best_critical
+
+    return transformed, applied, boxcox_lambdas, ad_stats, ad_criticals
 
 def run_parametric_manova(data, dvs):
-    """RM-MANOVA using Pillai's Trace"""
+    """Regularized MANOVA for repeated measures"""
     try:
+        wide_data = data.pivot_table(
+            index='Subject',
+            columns=['Env', 'N'],
+            values=dvs
+        ).fillna(0)
+        
+        # Regularize with pseudo-inverse
+        manova = MANOVA(wide_data, method='pinv')
+        mv_test = manova.mv_test()
+        
+        # Extract and save results
         results = []
-        # Single loop through DVs
-        for dv in dvs:
-            # Pivot and validate data for current DV
-            wide_data = data.pivot_table(index='Subject', 
-                                        columns=['Env','N'], 
-                                        values=dv)
-            
-            if wide_data.empty:
-                logging.warning(f"Skipping {dv} - insufficient data")
-                continue
-
-            # Run MANOVA and extract Pillai's Trace
-            manova = MANOVA(wide_data)
-            mv_test = manova.mv_test()
-            
-            # Get results for current DV
-            pillais = mv_test.results['x0']['stat'].loc["Pillai's trace"]
+        for effect in mv_test.results:
+            pillais = mv_test.results[effect]['stat'].loc["Pillai's trace"]
             results.append({
-                'DV': dv,
+                'Effect': ':'.join(effect) if isinstance(effect, tuple) else str(effect),
                 'Pillai\'s Trace': pillais['stat'],
                 'F': pillais['F value'],
                 'df_num': pillais['num df'],
@@ -221,13 +205,35 @@ def run_parametric_manova(data, dvs):
                 'p_value': pillais['p value'],
             })
         
-        # Save all results
-        pd.DataFrame(results).to_csv(RESULTS_DIR / 'parametric_MANOVA' / 'pillais_results.csv', index=False)
-        return len(results) > 0
+        results_df = pd.DataFrame(results)
+        results_df.to_csv(RESULTS_DIR / 'parametric_MANOVA' / 'manova_results.csv', index=False, encoding='utf-8')
+        
+        # Generate formatted summary
+        summary = [
+            "# MANOVA Results",
+            "## Significant Effects (Pillai's Trace)",
+            "| Effect | Value | F | df | p-value |",
+            "|--------|-------|---|---|---------|"
+        ]
+        
+        for _, row in results_df.iterrows():
+            sig = ("***" if row['p_value'] < 0.001 
+                   else "**" if row['p_value'] < 0.01 
+                   else "*" if row['p_value'] < 0.05 
+                   else "")
+            summary.append(
+                f"| {row['Effect']} | {row['Pillai\'s Trace']:.3f} | "
+                f"{row['F']:.2f} | {row['df_num']},{row['df_den']} | "
+                f"{row['p_value']:.4f}{sig} |"
+            )
+        
+        (RESULTS_DIR / 'parametric_MANOVA' / 'manova_summary.md').write_text('\n'.join(summary), encoding='utf-8')
+        return True
         
     except Exception as e:
-        logging.error(f"MANOVA failed: {str(e)}")
+        logging.error(f"MANOVA execution failed: {str(e)}")
         return False
+
 
 def run_nonparametric_analysis(data, dvs):
     """Aligned Rank Transform ANOVA"""
@@ -243,174 +249,100 @@ def run_nonparametric_analysis(data, dvs):
             model['DV'] = dv 
             results.append(model)
         # Concatenate and reset index before saving
-        pd.concat(results).reset_index(drop=True).to_csv(
-            RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_results.csv', index=False)
+        pd.concat(results).reset_index(drop=True).to_csv(RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_results.csv', index=False, encoding='utf-8')
         return True
     except Exception as e:
         logging.error(f"ART ANOVA failed: {str(e)}")
         return False
     
 def post_hoc_analysis(data):
-    """Perform and save post-hoc analysis for significant ART results"""
+    """Robust post-hoc analysis with empty result handling"""
     try:
-        # Load and prepare ART results
-        art_path = RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_results.csv'
-        art_results = pd.read_csv(art_path)
-        
-        # Determine p-value selection based on sphericity (GG corrected or uncorrected)
-        sphericity_thresh = 0.75
-        use_gg = art_results['eps'] < sphericity_thresh
-        art_results['p_selected'] = np.where(use_gg, art_results['p-GG-corr'], art_results['p-unc'])
-        art_results['p_used'] = np.where(use_gg, 'GG-corrected', 'Uncorrected')
-        
-        # Identify significant results and those approaching significance
-        sig_thresh = 0.05
-        approaching_thresh = 0.1
-        sig_mask = art_results['p_selected'] < sig_thresh
-        approaching_mask = art_results['p_selected'].between(sig_thresh, approaching_thresh)
-        
-        significant = art_results[sig_mask].copy()
-        approaching = art_results[approaching_mask].copy()
-        
-        # Generate summary report
-        summary = [
-            "# Aligned Ranks Transformation (ART) ANOVA Results Summary",
-            f"Significance thresholds: p < {sig_thresh} (significant), p < {approaching_thresh} (approaching)"
-        ]
-        
-        if not significant.empty:
-            summary.append("## Statistically Significant Findings")
-            sig_display = significant[['Source', 'DV', 'F', 'p_selected', 'ng2', 'p_used']].rename(
-                columns={
-                    'p_selected': 'p',
-                    'p_used': 'Correction',
-                    'ng2': 'effect size ng2'
-                }
-            )
-            summary.append(sig_display.to_markdown(index=False))
-        
-        if not approaching.empty:
-            summary.append("## Findings Approaching Significance")
-            appr_display = approaching[['Source', 'DV', 'F', 'p_selected', 'ng2', 'p_used']].rename(
-                columns={
-                    'p_selected': 'p',
-                    'p_used': 'Correction',
-                    'ng2': 'effect size ng2'
-                }
-            )
-            summary.append(appr_display.to_markdown(index=False))
-        
-        # Post-hoc analysis
+        art_results = pd.read_csv(RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_results.csv')
         posthoc_dfs = []
-        for _, row in significant.iterrows():
-            dv = row['DV']
-            effect = row['Source']
-            factors = effect.split(' * ') if '*' in effect else [effect]
+        required_cols = ['Effect', 'A', 'B', 'T', 'dof', 'p-corr', 'hedges']
+
+        for _, row in art_results[art_results['p_selected'] < 0.05].iterrows():
             try:
                 comparisons = pg.pairwise_tests(
-                    data=data, dv=dv, within=factors, subject='Subject', padjust='holm'
-                )
-                comparisons['ART_p'] = row['p_selected']
-                comparisons['Effect'] = effect
-                comparisons['DV'] = dv
-                posthoc_dfs.append(comparisons)
-            except Exception as e:
-                logging.warning(f"Failed posthoc for {effect} on {dv}: {str(e)}")
-        
-        # Save outputs
-        if posthoc_dfs:
-            pd.concat(posthoc_dfs).to_csv(
-                RESULTS_DIR / 'nonparametric_ANOVA' / 'post_hoc_results.csv', 
-                index=False
-            )
-        with open(RESULTS_DIR / 'nonparametric_ANOVA' / 'art_ANOVA_summary.md', 'w') as f:
-            f.write('\n\n'.join(summary))
-        logging.info(f"Post-hoc analysis completed. {len(significant)} significant effects found.")
-        
-        if posthoc_dfs:
-            posthoc_df = pd.concat(posthoc_dfs)
-            posthoc_df.to_csv(
-                RESULTS_DIR / 'nonparametric_ANOVA' / 'post_hoc_results.csv', 
-                index=False
-            )
-
-            # Generate post-hoc summary
-            posthoc_summary = ["# Post-Hoc Pairwise Comparisons Summary"]
-
-            # Filter for significant and approaching significance
-            sig_mask = posthoc_df['p-corr'] < 0.05
-            approaching_mask = posthoc_df['p-corr'].between(0.05, 0.1)
-            significant = posthoc_df[sig_mask]
-            approaching = posthoc_df[approaching_mask]
-
-            if not significant.empty:
-                posthoc_summary.append("## Statistically Significant Pairwise Comparisons")
-                display_cols = ['Effect', 'DV', 'A', 'B', 'T', 'dof', 'p-corr', 'hedges']
-                posthoc_summary.append(significant[display_cols].rename(
-                    columns={
-                        'A': 'Group 1',
-                        'B': 'Group 2',
-                        'T': 't-value',
-                        'dof': 'df',
-                        'p-corr': 'corrected p',
-                        'hedges': 'Hedges\' g'
-                    }
-                ).to_markdown(index=False))
-
-            if not approaching.empty:
-                posthoc_summary.append("## Pairwise Comparisons Approaching Significance")
-                posthoc_summary.append(approaching[display_cols].rename(
-                    columns={
-                        'A': 'Group 1',
-                        'B': 'Group 2',
-                        'T': 't-value',
-                        'dof': 'df',
-                        'p-corr': 'corrected p',
-                        'hedges': 'Hedges\' g'
-                    }
-                ).to_markdown(index=False))
-
-            with open(RESULTS_DIR / 'nonparametric_ANOVA' / 'post_hoc_summary.md', 'w') as f:
-                f.write('\n\n'.join(posthoc_summary))
+                    data=data, 
+                    dv=row['DV'],
+                    within=row['Source'].split('*'),
+                    subject='Subject',
+                    padjust='holm'
+                ).assign(DV=row['DV'], Effect=row['Source'])
                 
+                if all(col in comparisons.columns for col in required_cols):
+                    posthoc_dfs.append(comparisons[required_cols])
+                    
+            except Exception as e:
+                logging.warning(f"Skipping {row['Source']} on {row['DV']}: {str(e)}")
+
+        if posthoc_dfs:
+            pd.concat(posthoc_dfs).to_csv(RESULTS_DIR / 'nonparametric_ANOVA' / 'post_hoc_results.csv', index=False, encoding='utf-8')
+
     except Exception as e:
-        logging.error(f"Post-hoc analysis failed: {str(e)}")
-        raise
+        logging.error(f"Post-hoc analysis aborted: {str(e)}")
 
-def save_assumption_reports(manova_assumptions, manova_dvs, art_dvs):
-    """Save detailed assumption reports with numerical data"""
-    assumption_dir = RESULTS_DIR / 'assumptions'
-    assumption_dir.mkdir(exist_ok=True)
+def save_assumption_reports(assumptions, save_dir):
+    """Saves MANOVA assumption reports in Markdown format for repeated measures."""
+    save_dir.mkdir(parents=True, exist_ok=True)
+    report = ["# MANOVA Assumption Validation Report\n"]
 
-    # Prepare the manova_dvs string
-    if manova_dvs:
-        manova_dvs_str = '\n'.join(f'- {dv}' for dv in manova_dvs)
-    else:
-        manova_dvs_str = '*None*'
+    # 1. Matrix Rank Check (updated reference)
+    report.append("## Matrix Rank Check")
+    report.append(f"- Required: {len(assumptions['correlation_check'])}")  # Number of DVs
+    report.append(f"- Actual: {assumptions['matrix_rank']}")
 
-    # Prepare the art_dvs string
-    art_dvs_str = '\n'.join(f'- {dv}' for dv in art_dvs)
+    # 2. Multicollinearity Check
+    report.append("\n## Multicollinearity Check")
+    report.append(f"- Condition Number: {assumptions['condition_number']:.1f}")
+    report.append(f"- Threshold: <30")
+    report.append(f"- Status: {'PASS' if assumptions['condition_number'] < 30 else 'FAIL'}")
 
-    # 1. Human-readable summary
-    with open(assumption_dir / 'assumption_summary.md', 'w', encoding='utf-8') as f:
-        f.write('\n\n'.join([
-            "# Statistical Analysis Assumption Reports",
-            "## MANOVA Eligibility",
-            f"- **Multivariate normality p-value**: {manova_assumptions['multivariate_normality']:.4f}",
-            f"- **Homogeneity of covariance p-value**: {manova_assumptions['homogeneity_covariance']:.4f}",
-            "### Eligible DVs for MANOVA:",
-            manova_dvs_str,
-            "## ART ANOVA Coverage",
-            "### All Analyzed DVs:",
-            art_dvs_str
-        ]))
+    # 3. Multivariate Normality
+    report.append("\n## Multivariate Normality (Henze-Zirkler)")
+    hz_status = "PASS" if assumptions['multivariate_normality'] else "FAIL"
+    report.append(f"- Status: {hz_status}")
 
-    # 2. Save raw numerical data
-    pd.DataFrame({
-        'check': ['multivariate_normality', 'homogeneity_covariance'],
-        'p_value': [manova_assumptions['multivariate_normality'], 
-                   manova_assumptions['homogeneity_covariance']]
-    }).to_csv(assumption_dir / 'manova_assumption_values.csv', index=False)
+    # 4. Sphericity Checks
+    report.append("\n## Sphericity (Mauchly's Test)")
+    report.append("| Effect | p-value | Status |")
+    report.append("|--------|---------|--------|")
+    for effect, data in assumptions['sphericity'].items():
+        pval = data['pval']  # Extract p-value from dict
+        status = "PASS" if pval >= 0.01 else "FAIL"
+        report.append(f"| {effect} | {pval:.4f} | {status} |")
+
+    # 5. Correlation Check
+    report.append("\n## High Correlation Check (r > 0.8)")
+    report.append("| DV | Correlated With |")
+    report.append("|----|-----------------|")
+    for dv, correlates in assumptions['correlation_check'].items():
+        correlates_str = ', '.join(correlates) if correlates else 'None'
+        report.append(f"| {dv} | {correlates_str} |")
+
+    # 6. DV Exclusion Reasons (updated)
+    report.append("\n## DV Exclusion Reasons")
+    report.append("| DV | Failed Assumptions |")
+    report.append("|----|--------------------|")
+    for dv in assumptions['correlation_check']:
+        failed = []
+        if not assumptions['multivariate_normality']:
+            failed.append("Multivariate Normality")
+        if any(v['pval'] < 0.01 for v in assumptions['sphericity'].values()):  # Fixed line
+            failed.append("Sphericity")
+        if assumptions['condition_number'] >= 30:
+            failed.append("Multicollinearity")
+        if len(assumptions['correlation_check'][dv]) > 0:
+            failed.append("High Correlation")
+        
+        report.append(f"| {dv} | {', '.join(failed) if failed else 'All checks passed'} |")
+    
+    (save_dir / 'manova_assumptions.md').write_text('\n'.join(report), encoding='utf-8')
+
+
+
 
 def generate_visualizations(data, dvs, analysis_type):
     """Generate analysis-specific visualizations"""
@@ -425,7 +357,7 @@ def generate_visualizations(data, dvs, analysis_type):
         plt.close()
         
 def main():
-    """Main analysis workflow with parallel parametric/nonparametric paths"""
+    """Main analysis workflow with dynamic DV removal"""
     try:
         initialize_directories()
         data = load_dataset()
@@ -434,37 +366,44 @@ def main():
                       'CorrRatio', 'RTCorrAv', 'RTIncorrAv']
         dvs = [col for col in initial_dvs if col in data.columns]
         
-        # ===== Parametric Path =====
-        # Apply transformations
+        # ===== Initial Assumption Check =====
         logging.info("\n=== Applying Data Transformations ===")
-        transformed_data, transforms, boxcox_lambdas = apply_transformations(data, dvs)
-        # Save transformation details
-        df = pd.DataFrame({
-            'DV': list(transforms.keys()),
-            'Transform': list(transforms.values()),
-            'BoxCox_Lambda': [boxcox_lambdas.get(dv, np.nan) for dv in transforms.keys()]
-        })
-        df.to_csv(RESULTS_DIR / 'assumptions' / 'data_transformations.csv', index=False)
+        transformed_data, transforms, boxcox_lambdas, ad_stats, ad_criticals = apply_transformations(data, dvs)
         
         if len(dvs) >= 2:
-            logging.info("\n=== Checking MANOVA Assumptions ===")
-            manova_assumptions = check_manova_assumptions(transformed_data, dvs)
-            manova_dvs = [
-                dv for dv in manova_assumptions['valid_dvs']
-                if (manova_assumptions['multivariate_normality'] is not None
-                    and manova_assumptions['homogeneity_covariance'] is not None
-                    and manova_assumptions['multivariate_normality'] >= 0.05
-                    and manova_assumptions['homogeneity_covariance'] >= 0.001)
-            ]
+            logging.info("\n=== Initial MANOVA Assumption Check ===")
+            initial_assumptions = check_manova_assumptions(transformed_data, dvs)
+            save_assumption_reports(initial_assumptions, RESULTS_DIR / 'assumptions' / 'initial_assumptions')
+            
+            # ===== Dynamic DV Removal =====
+            clean_dvs = dvs.copy()
+            
+            # 1. Remove DVs correlated with F1 (preserve F1)
+            if 'F1' in initial_assumptions['correlation_check']:
+                f1_correlates = initial_assumptions['correlation_check']['F1']
+                if f1_correlates:
+                    logging.info(f"Removing F1-correlated DVs: {', '.join(f1_correlates)}")
+                    clean_dvs = [dv for dv in clean_dvs if dv not in f1_correlates]
+                    clean_dvs.append('F1')  # Ensure F1 is retained
+            
+            # 2. Remove other highly correlated DVs
+            for dv in initial_assumptions['correlation_check']:
+                if dv != 'F1' and initial_assumptions['correlation_check'][dv]:
+                    logging.info(f"Removing {dv} due to high correlation")
+                    clean_dvs = [x for x in clean_dvs if x != dv]
+            
+            # ===== Recheck Assumptions =====
+            if len(clean_dvs) >= 2:
+                logging.info("\n=== Rechecking Assumptions with Cleaned DVs ===")
+                final_assumptions = check_manova_assumptions(transformed_data, clean_dvs)
+                save_assumption_reports(final_assumptions, RESULTS_DIR / 'assumptions' / 'final_assumptions')
+                manova_dvs = final_assumptions['valid_dvs']
+            else:
+                manova_dvs = []
+            
         else:
             manova_dvs = []
         
-        # Remove multicollinear DVs
-        if manova_dvs:
-            corr_matrix = transformed_data[manova_dvs].corr().abs()
-            upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-            manova_dvs = [col for col in manova_dvs if not any(upper[col] > 0.7)]
-
         # ===== Nonparametric Path =====
         # Always use all DVs with original data
         art_dvs = dvs.copy()
@@ -483,20 +422,17 @@ def main():
         
         # Nonparametric ART ANOVA (always runs)
         logging.info(f"\n=== Running ART ANOVA on all DVs: {', '.join(art_dvs)} ===")
-        art_success = run_nonparametric_analysis(data.copy(), art_dvs)  # Original data
+        art_success = run_nonparametric_analysis(data.copy(), art_dvs)
         generate_visualizations(data, art_dvs, 'ART ANOVA')
         
         # Post-hoc analyses
         if manova_success:
             logging.info("\n=== MANOVA Post-hoc Analysis ===")
-            # Add MANOVA post-hoc implementation here
             
         if art_success:
             logging.info("\n=== ART ANOVA Post-hoc Analysis ===")
-            post_hoc_analysis(data.copy())  # Original data
+            post_hoc_analysis(data.copy())
 
-        # Save comprehensive reports
-        save_assumption_reports(manova_assumptions, manova_dvs, art_dvs)
         
     except Exception as e:
         logging.critical(f"Critical pipeline error: {str(e)}")
