@@ -55,16 +55,18 @@ def load_dataset():
         logging.critical("Missing input data file - aborting analysis")
         sys.exit(1)
 
-def filter_dvs_by_missing(data, dvs, max_missing=0.2):
-    """Identify variables with acceptable missing data levels"""
+def filter_dvs_by_missing(data, dvs, task_level):
+    """Exclude variables with missing values"""
     valid = []
     for dv in dvs:
-        missing = data[dv].isna().mean()
-        if missing <= max_missing:
-            valid.append(dv)
+        if data[dv].isna().any():
+            missing_count = data[dv].isna().sum()
+            total = len(data[dv])
+            logging.warning(f"Excluding {dv} from {task_level} - {missing_count}/{total} ({missing_count/total:.1%}) missing values")
         else:
-            logging.warning(f"Excluding {dv} - {missing:.1%} missing values")
+            valid.append(dv)
     return valid
+
 
 def apply_transformations(data, dvs):
     """Apply optimal transformation to normalize each variable"""
@@ -238,25 +240,33 @@ def generate_visualizations(data, dvs, task_level_str):
     viz_dir = RESULTS_DIR / task_level_str / 'visualizations'
     viz_dir.mkdir(exist_ok=True)
     
+    # Plot only requested DVs
     for dv in dvs:
+        if dv not in data.columns:
+            logging.warning(f"Skipping visualization for {dv} - column missing")
+            continue
+            
         plt.figure(figsize=(10, 6))
         sns.lineplot(x='Env', y=dv, data=data, errorbar=('ci', 95), estimator='mean')
         plt.title(f"{task_level_str} - {dv} by Environment")
-        plt.savefig(viz_dir / f"{dv}_lineplot.png")
+        plt.savefig(viz_dir / f"{dv}_lineplot.png", bbox_inches='tight')
         plt.close()
 
 
 def analyze_task_data(data, task_level, variables):
     """Core analysis workflow for single task difficulty"""
-    filtered_vars = filter_dvs_by_missing(data, variables)
     logging.info(f"\n=== Analyzing {task_level}-back Task ===")
+    
+    # Filter data
+    filtered_vars = filter_dvs_by_missing(data, variables, task_level)
     if not filtered_vars:
         logging.warning(f"No valid variables for {task_level}-back analysis")
-        return
+        return []
 
+    # Apply transformations
     transformed, methods = apply_transformations(data, filtered_vars)
 
-    # Check assumptions for ALL variables
+    # Check assumptions for all variables
     all_valid = True
     assumptions_dict = {}
     for dv in filtered_vars:
@@ -314,8 +324,41 @@ def analyze_task_data(data, task_level, variables):
         output_dir.mkdir(parents=True, exist_ok=True)
         pd.concat(results).to_csv(output_dir / 'combined_results.csv', index=False)
 
+    # Prepare visualization data
+    if analysis_type == 'parametric':
+        # Use transformed data but keep only filtered variables
+        viz_data = transformed[['Subject', 'Env'] + filtered_vars].copy()
+    else:
+        # Use raw data but keep only filtered variables
+        viz_data = data[['Subject', 'Env'] + filtered_vars].copy()
+
     # Visualizations
-    generate_visualizations(transformed if analysis_type == 'parametric' else data, filtered_vars, task_level)
+    generate_visualizations(viz_data, filtered_vars, task_level)
+    
+    return filtered_vars
+    
+def generate_combined_visualizations(combined_data, dvs):
+    """Create combined 2-back vs 3-back visualizations"""
+    combined_dir = RESULTS_DIR / 'combined_visualizations'
+    combined_dir.mkdir(parents=True, exist_ok=True)
+    
+    for dv in dvs:
+        plt.figure(figsize=(12, 8))
+        sns.lineplot(
+            data=combined_data,
+            x='Env',
+            y=dv,
+            hue='Task',
+            style='Task',
+            markers=True,
+            errorbar=('ci', 95),
+            estimator='mean'
+        )
+        plt.title(f"{dv} Comparison: 2-back vs 3-back Tasks")
+        plt.ylabel(dv)
+        plt.savefig(combined_dir / f"combined_{dv}_comparison.png", bbox_inches='tight')
+        plt.close()
+
 
 def main():
     """Main analysis workflow controller"""
@@ -328,16 +371,40 @@ def main():
             'CorrRatio', 'RTCorrAv', 'RTIncorrAv'
         ]
         
+        # Store filtered variables and raw data for each task
+        filtered_vars_per_task = {}
+        all_raw = []
+        
         # Process each task difficulty separately
         for task in [2, 3]:
             task_level = f"{task}back"
             task_data = raw_data[raw_data['N'] == task].copy()
             current_vars = [v for v in target_vars if v in task_data.columns]
-            analyze_task_data(task_data, task_level, current_vars)
             
+            # Run analysis and get filtered variables
+            filtered_vars = analyze_task_data(task_data, task_level, current_vars)
+            filtered_vars_per_task[task_level] = filtered_vars
+            
+            # Prepare visualization data with only filtered variables
+            viz_data = task_data[['Subject', 'Env'] + filtered_vars].copy()
+            viz_data['Task'] = task_level
+            all_raw.append(viz_data)
+
+        # Generate combined visualizations using common filtered DVs
+        if all_raw:
+            # Get variables present in ALL tasks after filtering
+            common_dvs = set.intersection(*[set(vars) for vars in filtered_vars_per_task.values()])
+            
+            if common_dvs:
+                combined_data = pd.concat(all_raw)
+                generate_combined_visualizations(combined_data, list(common_dvs))
+            else:
+                logging.warning("No common variables across tasks for combined visualization")
+
     except Exception as e:
         logging.critical(f"Pipeline failure: {str(e)}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
