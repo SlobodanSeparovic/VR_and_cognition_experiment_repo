@@ -8,6 +8,7 @@ import sys
 import pingouin as pg
 from pathlib import Path
 from sklearn.preprocessing import PowerTransformer
+from statsmodels.formula.api import ols
 from scipy.stats import rankdata, boxcox, anderson
 
 # Configure numerical stability
@@ -68,19 +69,20 @@ def filter_dvs_by_missing(data, dvs, task_level):
     return valid
 
 
-def apply_transformations(data, dvs):
-    """Apply optimal transformation to normalize each variable"""
+def apply_transformations(data, dvs, group_var='Subject'):
+    """Apply transformations to optimize residual normality for RM-ANOVA"""
     transformed = data.copy()
     methods = {}
     
     transformation_candidates = [
         ('yeo_johnson', lambda x: PowerTransformer(method='yeo-johnson').fit_transform(x.reshape(-1,1)).flatten()),
         ('boxcox', lambda x: boxcox(x)[0]),
-        ('log', lambda x: np.log(x + 1e-6)),  # Add small constant to handle zeros
-        ('sqrt', lambda x: np.sqrt(x + 0.5)),  # Add 0.5 to handle zero/negative values
+        ('log', lambda x: np.log(x + 1e-6)),
+        ('sqrt', lambda x: np.sqrt(x + 0.5)),
         ('cube_root', lambda x: np.cbrt(x)),
-        ('reciprocal', lambda x: 1/(x + 0.1)),  # Add 0.1 to avoid division by zero
-        ('asinh', lambda x: np.arcsinh(x))
+        ('reciprocal', lambda x: 1/(x + 0.1)),
+        ('asinh', lambda x: np.arcsinh(x)),
+        ('original', lambda x: x)  # Baseline comparison
     ]
     
     for dv in dvs:
@@ -88,64 +90,76 @@ def apply_transformations(data, dvs):
         best_method = 'original'
         best_score = np.inf
         
-        # Handle negative values
-        min_val = original.min()
-        if min_val <= 0:
-            shifted = original + abs(min_val) + 1e-6
-        else:
-            shifted = original.copy()
-
         for name, transform in transformation_candidates:
             try:
-                # Apply transformation
-                trans_data = transform(shifted) if name in ['yeo_johnson', 'boxcox'] else transform(original)
+                # Apply transformation with consistent shifting
+                if name in ['yeo_johnson', 'boxcox']:
+                    min_val = original.min()
+                    shifted = original + abs(min_val) + 1e-6 if min_val <= 0 else original.copy()
+                    trans_data = transform(shifted)
+                else:
+                    trans_data = transform(original)
+
+                # Create temporary dataset
+                temp_df = data[[group_var, 'Env']].copy()
+                temp_df[dv] = trans_data
                 
-                # Calculate normality score
-                score = anderson(trans_data).statistic
+                # Fit repeated measures model
+                model = ols(f"{dv} ~ C(Env) + C({group_var})", data=temp_df).fit()
+                residuals = model.resid
                 
-                # Update best method if better score
+                # Skip if insufficient data
+                if len(residuals) < 3:
+                    continue
+                
+                # Evaluate residual normality
+                score = anderson(residuals).statistic
+                
                 if score < best_score:
                     best_score = score
                     best_method = name
-                    
+
             except Exception as e:
                 logging.debug(f"Transformation {name} failed for {dv}: {str(e)}")
                 continue
 
-        # Apply best transformation
+        # Apply best transformation consistently
         if best_method != 'original':
-            transform_func = dict(transformation_candidates)[best_method]
-            transformed[dv] = transform_func(shifted) if best_method in ['yeo_johnson', 'boxcox'] else transform_func(original)
+            if best_method in ['yeo_johnson', 'boxcox']:
+                min_val = original.min()
+                shifted = original + abs(min_val) + 1e-6 if min_val <= 0 else original.copy()
+                transformed[dv] = transform(shifted)
+            else:
+                transformed[dv] = transform(original)
+                
             logging.info(f"Applied {best_method} transformation to {dv}")
-        else:
-            logging.info(f"No transformation needed for {dv}")
             
         methods[dv] = best_method
 
     return transformed, methods
 
+
 def check_rm_assumptions(data, dv, group_var='Subject'):
     """Validate ANOVA assumptions for single dependent variable"""
     assumptions = {
-        'normality': {},
+        'residual_normality': False,
         'sphericity': {'pval': 1.0, 'W': 1.0},
-        'homogeneity': True,
-        'valid': False,
-        'env_data': {}, 
-        'epsilon': 1.0
+        'valid': False
     }
-    
-    # Normality per environment
-    for env in data['Env'].unique():
-        env_series = data[data['Env'] == env][dv].dropna()
-        assumptions['env_data'][env] = env_series
-        
-        try:
-            result = pg.normality(env_series)
-            assumptions['normality'][env] = result['pval'].values[0] >= 0.05
-        except Exception as e:
-            logging.error(f"Normality check failed for {dv}/{env}: {str(e)}")
-            assumptions['normality'][env] = False
+
+    # Residual normality check
+    try:
+        # Get residuals
+        # Fit the model using statsmodels
+        model = ols(f"{dv} ~ C(Env) + C({group_var})", data=data).fit()
+        # Get residuals
+        residuals = model.resid
+        # test the residuals for normality
+        norm_test = pg.normality(residuals)
+        assumptions['residual_normality'] = norm_test['pval'].values[0] >= 0.05
+    except Exception as e:
+        logging.error(f"Residual normality check failed: {str(e)}")
+        assumptions['residual_normality'] = False
 
     # Sphericity check
     try:
@@ -158,26 +172,10 @@ def check_rm_assumptions(data, dv, group_var='Subject'):
         logging.error(f"Sphericity check failed: {str(e)}")
         assumptions['sphericity']['pval'] = 0.0
 
-    # Homogeneity check
-    try:
-        levene = pg.homoscedasticity(data, dv=dv, group='Env')
-        assumptions['homogeneity'] = levene['pval'].values[0] >= 0.05
-    except Exception as e:
-        logging.error(f"Homogeneity check failed: {str(e)}")
-        assumptions['homogeneity'] = False
-
-    # Get epsilon from ANOVA
-    try:
-        aov = pg.rm_anova(data=data, dv=dv, within='Env', subject=group_var, correction='auto')
-        assumptions['epsilon'] = aov.at[0, 'eps']
-    except Exception as e:
-        logging.error(f"Epsilon check failed: {str(e)}")
-        assumptions['epsilon'] = 0.5
-
+    # Validity condition
     assumptions['valid'] = (
-        all(assumptions['normality'].values()) and
-        assumptions['sphericity']['pval'] >= 0.05 and
-        assumptions['homogeneity']
+        assumptions['residual_normality'] and 
+        assumptions['sphericity']['pval'] >= 0.05
     )
     
     return assumptions
@@ -200,37 +198,26 @@ def run_nonparametric_analysis(data, dv):
 
 def generate_report(assumptions, transforms, dv, task, save_dir):
     """Create detailed Markdown report for each analysis"""
-    # Ensure save_dir is a directory, not a file path
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
+    
     report = [
         f"## Analysis Report: {dv} ({task}-back)",
         "### Data Transformations",
-        f"Applied method: **{transforms.get(dv, 'none')}**",
+        f"Applied method: **{transforms.get('method', 'none')}**",
         "\n### Assumption Checks",
-        "#### Normality (Shapiro-Wilk)",
-        "| Environment | n | Passed | p-value  |",
-        "|-------------|---|--------|----------|"
-    ]
-    for env, passed in assumptions['normality'].items():
-        env_data = assumptions['env_data'].get(env, pd.Series())
-        n = len(env_data)
-        try:
-            pval = pg.normality(env_data)['pval'].values[0]
-        except:
-            pval = np.nan
-        report.append(f"| {env} | {n} | {'Yes' if passed else 'No'} | {pval:.4f} |")
-    report.extend([
+        "#### Residual Normality (Shapiro-Wilk)",
+        f"- p-value: {pg.normality(assumptions.get('residuals', [0]))['pval'].values[0]:.4f}",
+        f"- Passed: {'Yes' if assumptions['residual_normality'] else 'No'}",
         "\n#### Sphericity (Mauchly's Test)",
         f"- W = {assumptions['sphericity'].get('W', 0):.3f}",
-        f"- p = {assumptions['sphericity'].get('pval', 0):.4f}",
+        f"- p-value = {assumptions['sphericity'].get('pval', 0):.4f}",
         f"- Passed: {'Yes' if assumptions['sphericity'].get('pval', 0) >= 0.05 else 'No'}",
-        "\n#### Variance Homogeneity (Levene's)",
-        f"- Passed: {'Yes' if assumptions.get('homogeneity', False) else 'No'}",
         f"\n**Overall Validity:** {'Yes' if assumptions['valid'] else 'No'}"
-    ])
+    ]
+    
     report_path = save_dir / f"{dv}_report.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure parent exists
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(report), encoding="utf-8")
     logging.info(f"Saved assumption report for {dv} at {report_path}")
 
@@ -263,74 +250,75 @@ def analyze_task_data(data, task_level, variables):
         logging.warning(f"No valid variables for {task_level}-back analysis")
         return []
 
-    # Apply transformations
-    transformed, methods = apply_transformations(data, filtered_vars)
+    # Initialize results lists
+    parametric_results = []
+    nonparametric_results = []
+    assumptions_dict = {}
+    all_valid = True
 
     # Check assumptions for all variables
-    all_valid = True
-    assumptions_dict = {}
     for dv in filtered_vars:
-        assumptions = check_rm_assumptions(transformed, dv)
+        # First check assumptions
+        assumptions = check_rm_assumptions(data, dv)
         assumptions_dict[dv] = assumptions
-        if not assumptions['valid']:
-            all_valid = False
-
-    # Generate reports for ALL DVs
-    parametric_dir = RESULTS_DIR / task_level / 'parametric'
-    for dv in filtered_vars:
-        generate_report(
-            assumptions_dict[dv],
-            methods,
-            dv,
-            task_level.replace('back', ''),
-            parametric_dir
-        )
         
-    # Initialize results list
-    results = []
+        # If assumptions are not valid, apply transformations
+        if not assumptions['valid']:
+            logging.info(f"Assumptions not met for {dv}. Applying transformations.")
+            transformed, methods = apply_transformations(data, [dv],)
+            # Recheck assumptions on transformed data
+            assumptions = check_rm_assumptions(transformed, dv)
+            assumptions_dict[dv] = assumptions
+            
+            if not assumptions['valid']:
+                all_valid = False
+                logging.warning(f"Assumptions still not met for {dv} after transformation.")
+            else:
+                logging.info(f"Assumptions met for {dv} after transformation.")
+        else:
+            logging.info(f"Assumptions met for {dv}.")
 
-    # Unified analysis path
-    if all_valid:
-        analysis_type = 'parametric'
-        output_dir = parametric_dir
-        # Run parametric analysis
-        for dv in filtered_vars:
+    # Define output directories
+    parametric_dir = RESULTS_DIR / task_level / 'parametric'
+    nonparametric_dir = RESULTS_DIR / task_level / 'nonparametric'
+    
+    # Run non-parametric analysis for all DVs
+    for dv in filtered_vars:
+        try:
+            friedman = pg.friedman(data=data, dv=dv, within='Env', subject='Subject')
+            friedman['DV'] = dv
+            nonparametric_results.append(friedman)
+        except Exception as e:
+            logging.error(f"Friedman failed for {dv}: {str(e)}")
+
+    # Run parametric analysis for valid DVs
+    for dv in filtered_vars:
+        if assumptions_dict[dv]['valid']:
             try:
                 aov = pg.rm_anova(
-                    data=transformed,
+                    data=transformed if not assumptions_dict[dv]['valid'] else data,
                     dv=dv,
                     within='Env',
                     subject='Subject',
                     correction='auto'
                 )
                 aov['DV'] = dv
-                results.append(aov)
+                parametric_results.append(aov)
             except Exception as e:
                 logging.error(f"ANOVA failed for {dv}: {str(e)}")
-    else:
-        analysis_type = 'nonparametric'
-        output_dir = RESULTS_DIR / task_level / 'nonparametric'
-        # Run non-parametric analysis
-        for dv in filtered_vars:
-            try:
-                friedman = pg.friedman(data=data, dv=dv, within='Env', subject='Subject')
-                friedman['DV'] = dv
-                results.append(friedman)
-            except Exception as e:
-                logging.error(f"Friedman failed for {dv}: {str(e)}")
 
-    # Save combined results
-    if results:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        pd.concat(results).to_csv(output_dir / 'combined_results.csv', index=False)
+    # Save combined results for non-parametric analysis
+    if nonparametric_results:
+        nonparametric_dir.mkdir(parents=True, exist_ok=True)
+        pd.concat(nonparametric_results).to_csv(nonparametric_dir / 'combined_results.csv', index=False)
+
+    # Save combined results for parametric analysis
+    if parametric_results:
+        parametric_dir.mkdir(parents=True, exist_ok=True)
+        pd.concat(parametric_results).to_csv(parametric_dir / 'combined_results.csv', index=False)
 
     # Prepare visualization data
-    if analysis_type == 'parametric':
-        # Use transformed data but keep only filtered variables
-        viz_data = transformed[['Subject', 'Env'] + filtered_vars].copy()
-    else:
-        # Use raw data but keep only filtered variables
-        viz_data = data[['Subject', 'Env'] + filtered_vars].copy()
+    viz_data = transformed[['Subject', 'Env'] + filtered_vars].copy() if any(assumptions_dict[dv]['valid'] for dv in filtered_vars) else data[['Subject', 'Env'] + filtered_vars].copy()
 
     # Visualizations
     generate_visualizations(viz_data, filtered_vars, task_level)
