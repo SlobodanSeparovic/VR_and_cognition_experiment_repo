@@ -187,20 +187,43 @@ def generate_posthoc_report(task_level: str, nonparametric_path: Path, parametri
         md_content += "\n### Post-Hoc Pairwise Comparisons\n"
         for dv in posthoc_df['DV'].unique():
             md_content += f"#### {dv}\n"
-            dv_df = posthoc_df[posthoc_df['DV'] == dv]
-            
+            dv_df = posthoc_df[posthoc_df['DV'] == dv].copy()         
             # Add mean differences
             data = pd.read_csv(DATA_PATH)
             means = data.groupby('Env')[dv].mean().round(2)
             dv_df['Means'] = dv_df.apply(
                 lambda row: f"{means[row['Env1']]} vs {means[row['Env2']]}",
                 axis=1
-            )
-            
+            )            
             md_content += dv_df[['Means', 'Env1', 'Env2', 'p_value', 'Significance']]\
                 .to_markdown(index=False, floatfmt=".4f") + "\n\n"
+                
+    # Add parametric post-hoc results
+    para_posthoc_path = parametric_path.parent / 'posthoc_parametric.csv'
+    if para_posthoc_path.exists():
+        try:
+            para_ph = pd.read_csv(para_posthoc_path)
+            # Check if required columns exist
+            required_cols = ['Env1', 'Env2', 'p-corr', 'cohen-d']
+            if all(col in para_ph.columns for col in required_cols):
+                md_content += "\n### Parametric Post-Hoc Comparisons (Bonferroni-corrected)\n"
+                for dv in para_ph['DV'].unique():
+                    md_content += f"#### {dv}\n"
+                    dv_df = para_ph[para_ph['DV'] == dv].copy()
+                    # Convert p-corr to numeric
+                    dv_df['p-corr'] = pd.to_numeric(dv_df['p-corr'], errors='coerce')
+                    dv_df = dv_df.rename(columns={
+                        'p-corr': 'p_value',
+                        'cohen-d': 'Effect_Size'
+                    })
+                    md_content += dv_df[['Env1', 'Env2', 'p_value', 'Effect_Size']]\
+                        .to_markdown(index=False, floatfmt=".4f") + "\n\n"
+            else:
+                logging.warning(f"Missing columns in {para_posthoc_path}")
+        except Exception as e:
+            logging.error(f"Failed to process parametric post-hoc: {str(e)}")
 
-    report_path = nonparametric_path.parent / 'posthoc_nonparametric.md'
+    report_path = nonparametric_path.parent.parent / 'posthoc_analyses.md'
     report_path.write_text(md_content)
     logging.info(f"Generated post-hoc report at {report_path}")
     
@@ -234,6 +257,36 @@ def friedman_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.
         results.append(ph_long)
     
     return pd.concat(results) if results else pd.DataFrame()
+
+def parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
+    """Perform parametric post-hoc tests with Bonferroni correction"""
+    results = []
+    for dv in dvs:
+        try:
+            ph = pg.pairwise_tests(
+                data=data,
+                dv=dv,
+                within='Env',
+                subject='Subject',
+                parametric=True,
+                marginal=False,
+                alpha=0.05,
+                padjust='bonf'
+            )
+            # Rename columns to match expected format
+            ph = ph.rename(columns={
+                'A': 'Env1',
+                'B': 'Env2',
+                'hedges': 'cohen-d'  # Match effect size column name
+            })
+            ph['DV'] = dv
+            ph['Task'] = task_level
+            results.append(ph)
+        except Exception as e:
+            logging.error(f"Parametric post-hoc failed for {dv}: {str(e)}")
+    return pd.concat(results) if results else pd.DataFrame()
+
+
 
 
 def analyze_task_data(data: pd.DataFrame, 
@@ -306,7 +359,7 @@ def analyze_task_data(data: pd.DataFrame,
             except Exception as e:
                 logging.error(f"Parametric analysis failed for {dv}: {str(e)}")
 
-        # Non-parametric analysis path (ALWAYS RUN)
+        # Non-parametric analysis path runs always
         try:
             friedman = pg.friedman(
                 data=data,
@@ -349,7 +402,7 @@ def analyze_task_data(data: pd.DataFrame,
     if nonparametric_only:
         logging.info(f"{task_level} variables requiring non-parametric analysis: {', '.join(nonparametric_only)}")
 
-    # Perform post-hoc analysis
+    # Always perform nonparametric post-hoc analysis
     sig_dvs = [row['DV'] for _, row in pd.read_csv(nonpara_path).iterrows() 
               if row['p-unc'] < 0.05]
     if sig_dvs:
@@ -357,6 +410,20 @@ def analyze_task_data(data: pd.DataFrame,
         posthoc_path = nonparametric_dir / 'posthoc_conover.csv'
         posthoc_df.to_csv(posthoc_path, index=False)
         logging.info(f"Saved post-hoc results to {posthoc_path}")
+    
+    # Save parametric results
+    if parametric_results:
+        para_df = pd.concat(parametric_results)
+        para_path = parametric_dir / 'analysis_parametric.csv'
+        para_df.to_csv(para_path, index=False)
+        
+        # Perform parametric post-hoc
+        sig_para = para_df[para_df['p-unc'] < 0.05]['DV'].tolist()
+        if sig_para:
+            para_posthoc = parametric_posthoc(data, task_level, sig_para)
+            para_posthoc_path = parametric_dir / 'posthoc_parametric.csv'
+            para_posthoc.to_csv(para_posthoc_path, index=False)
+            logging.info(f"Saved parametric post-hoc results to {para_posthoc_path}")
     
     # Generate comparative report
     generate_posthoc_report(
