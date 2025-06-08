@@ -82,11 +82,13 @@ def generate_report(assumptions, transforms, dv, task_level, save_dir, analysis_
 ## Analysis Report: {dv} ({task_level})
 ### Data Transformations
 Applied method: **{transforms.get(dv, 'none')}**
+**Interpretation:** Transformations adjust data distribution to meet parametric assumptions. Yeo-Johnson preserves sign while handling zero/negative values.
 
 ### Assumption Checks
 1. **DV Normality (Shapiro-Wilk)**
    - p-value: {assumptions['normality_pval']:.4f}
-   - Passed: {'Yes' if assumptions['normality_passed'] else 'No'}"""
+   - Passed: {'Yes' if assumptions['normality_passed'] else 'No'}
+**Interpretation:** Tests if data follows normal distribution (null hypothesis assumes normal distribution). p > 0.05 does not reject null hypothesis."""
 
     if analysis_type == 'parametric':
         gg_applied = assumptions['epsilon_gg'] < 0.75
@@ -96,14 +98,27 @@ Applied method: **{transforms.get(dv, 'none')}**
         report_content += f"""
 2. **Sphericity Handling**
    - Mauchly's p-value: {assumptions['sphericity_pval']:.4f}
-   - Greenhouse-Geisser ε: {assumptions['epsilon_gg']:.3f}
-   - Correction Applied: {correction}"""
+   - Greenhouse-Geisser epsilon: {assumptions['epsilon_gg']:.3f}
+   - Correction Applied: {correction}
+**Interpretation:** Sphericity requires equal variance differences between conditions. epsilon < 1 indicates violation, requiring correction."""
 
-    eligibility_status = "Eligible for parametric analysis" if assumptions['valid'] else "Ineligible for parametric analysis"
+        if aov is not None:
+            if 'F' in aov.columns and 'ddof1' in aov.columns and 'ddof2' in aov.columns:
+                f_val = aov['F'].values[0]
+                df1 = aov['ddof1'].values[0]
+                df2 = aov['ddof2'].values[0]
+                eta_sq = (f_val * df1) / (f_val * df1 + df2)
+                report_content += f"""
+3. **Effect Size**
+   - **Partial eta-squared:** {eta_sq:.3f}
+**Interpretation:** Proportion of variance explained by factor."""
+
+    eligibility_status = "Eligible for parametric analysis." if assumptions['valid'] else "Ineligible for parametric analysis."
     
     report_content += f"""\n
 **Analysis Type:** {analysis_type.title()}
-**Eligibility Status:** {eligibility_status}"""
+**Eligibility Status:** {eligibility_status}
+**Note:** Parametric eligibility requires passed normality (p ≥ 0.05) and sphericity (p ≥ 0.05 or corrected)."""
 
     report_path = save_dir / f"{dv}_report.md"
     report_path.write_text(report_content.strip(), encoding="utf-8")
@@ -114,12 +129,16 @@ def analyze_task_data(data, task_level, variables):
     nonparametric_dir = RESULTS_DIR / task_level / 'nonparametric'
     parametric_dir.mkdir(parents=True, exist_ok=True)
     nonparametric_dir.mkdir(parents=True, exist_ok=True)
-
+    
     filtered_vars = filter_dvs_by_missing(data, variables, task_level)
     
     parametric_results = []
     nonparametric_results = []
     transformations = {}
+    
+    # Add tracking variables
+    parametric_candidates = []
+    nonparametric_only = []
 
     for dv in filtered_vars:
         assumptions = check_rm_assumptions(data, dv)
@@ -130,6 +149,12 @@ def analyze_task_data(data, task_level, variables):
             data[dv] = pt.fit_transform(data[[dv]])
             transformations[dv] = 'yeo-johnson'
             assumptions = check_rm_assumptions(data, dv)
+
+        # Track analysis eligibility
+        if assumptions['valid']:
+            parametric_candidates.append(dv)
+        else:
+            nonparametric_only.append(dv)
 
         # Parametric analysis path
         if assumptions['valid']:
@@ -196,6 +221,13 @@ def analyze_task_data(data, task_level, variables):
     
     if nonparametric_results:
         pd.concat(nonparametric_results).to_csv(nonparametric_dir/'analysis_nonparametric.csv', index=False)
+    
+    # Add logging statements
+    if parametric_candidates:
+        logging.info(f"{task_level} variables eligible for both analyses: {', '.join(parametric_candidates)}")
+    
+    if nonparametric_only:
+        logging.info(f"{task_level} variables requiring non-parametric analysis: {', '.join(nonparametric_only)}")
 
     return filtered_vars
 
@@ -237,7 +269,13 @@ def generate_combined_visualizations(combined_data, dvs):
         plt.close()
 
 def main():
-    """Main workflow controller"""
+    """Orchestrates statistical analysis workflow for N-back task data.    
+    Workflow steps:
+    1. Initializes directory structure
+    2. Loads and filters experimental data
+    3. Performs parametric/non-parametric analyses
+    4. Generates reports and visualizations
+    """
     try:
         initialize_directories()
         raw_data = load_dataset()
@@ -272,7 +310,7 @@ def main():
             common_dvs = set.intersection(*[set(vars) for vars in filtered_vars_per_task.values()])
             
             if common_dvs:
-                logging.info(f"Common variables: {', '.join(common_dvs)}")
+                logging.info(f"Common variables in 2-back and 3-back conditions: {', '.join(common_dvs)}")
                 combined_data = pd.concat(all_viz_data)
                 generate_combined_visualizations(combined_data, list(common_dvs))
             else:
