@@ -144,9 +144,8 @@ def generate_posthoc_report(task_level: str,
     df_nonpara = pd.read_csv(nonparametric_path)
     df_para = pd.read_csv(parametric_path)
     
-    # ========================================================================
     # Section 1: Significant Findings Identification
-    # ========================================================================
+
     # Filter results using standard significance thresholds
     sig_nonpara = df_nonpara[df_nonpara['p-unc'] < 0.05]
     approach_nonpara = df_nonpara[(df_nonpara['p-unc'] >= 0.05) & (df_nonpara['p-unc'] < 0.1)]
@@ -154,9 +153,8 @@ def generate_posthoc_report(task_level: str,
     sig_para = df_para[df_para['p-unc'] < 0.05]
     approach_para = df_para[(df_para['p-unc'] >= 0.05) & (df_para['p-unc'] < 0.1)]
 
-    # ========================================================================
     # Section 2: Method Agreement Analysis
-    # ========================================================================
+
     # Compare only variables appearing in significant/approaching results
     relevant_dvs = set(sig_nonpara['DV']).union(
         approach_nonpara['DV'],
@@ -180,9 +178,8 @@ def generate_posthoc_report(task_level: str,
         }
         comparison.append(comp_entry)
 
-    # ========================================================================
     # Section 3: Report Content Assembly
-    # ========================================================================
+
     md_content = f"""## Post-Hoc Analysis Report ({task_level})
 
 ### Environment Definitions
@@ -200,9 +197,8 @@ def generate_posthoc_report(task_level: str,
     for _, row in sig_nonpara.iterrows():
         md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
 
-    # ========================================================================
     # Section 4: Approaching Significance
-    # ========================================================================
+
     md_content += "\n\n### 2. Nonparametric Approaching Significance"
     if not approach_nonpara.empty:
         md_content += "\n| Variable           |   p-value |   W Stat |   Q Stat |"
@@ -212,9 +208,8 @@ def generate_posthoc_report(task_level: str,
     else:
         md_content += "\n*No variables approaching significance*"
 
-    # ========================================================================
     # Section 5: Parametric Results
-    # ========================================================================
+
     md_content += "\n\n### 3. Significant Parametric Results (RM ANOVA)"
     md_content += "\n| Variable           |   p-value |   F Value |   Effect Size (η²) |"
     md_content += "\n|--------------------|----------:|----------:|-------------------:|"
@@ -230,18 +225,17 @@ def generate_posthoc_report(task_level: str,
     else:
         md_content += "\n*No variables approaching significance*"
 
-    # ========================================================================
     # Section 6: Method Comparison
-    # ========================================================================
+
     md_content += """\n\n### 5. Method Agreement Analysis
 | Variable            | Nonparametric p | Parametric p | Agreement     |
 |---------------------|-----------------:|-------------:|--------------:|"""
     for row in sorted(comparison, key=lambda x: x['DV']):
         md_content += f"\n| {row['DV']:<19} | {row['Nonparametric_p']:>15.4f} | {row['Parametric_p']:>11.4f} | {row['Agreement']:>13} |"
 
-    # ========================================================================
+
     # Section 7: Post-Hoc Comparisons
-    # ========================================================================
+
     # Nonparametric Conover post-hocs
     posthoc_path = nonparametric_path.parent / 'posthoc_conover.csv'
     if posthoc_path.exists():
@@ -295,9 +289,8 @@ def generate_posthoc_report(task_level: str,
         except Exception as e:
             logging.error(f"Failed to process parametric post-hoc: {str(e)}")
 
-    # ========================================================================
+
     # Final Output
-    # ========================================================================
     report_path = nonparametric_path.parent.parent / 'posthoc_analyses.md'
     report_path.write_text(md_content, encoding='utf-8')
     logging.info(f"Generated post-hoc report at {report_path}")
@@ -538,7 +531,7 @@ def generate_combined_visualizations(combined_data, dvs):
             palette='colorblind'
         )
 
-        # Move legend to lower right corner with proper styling
+        # Move legend to lower right corner
         plt.legend(
             loc='lower right',
             bbox_to_anchor=(1.0, 0.0),
@@ -580,15 +573,15 @@ def main():
             task_level = f"{task}back"
             
             # Create separate copies for analysis and visualization
-            task_data_raw = raw_data[raw_data['N'] == task].copy()  # Raw data for visualization
-            task_data_analysis = task_data_raw.copy()  # Copy for analysis
+            task_data_raw = raw_data[raw_data['N'] == task].copy()
+            task_data_analysis = task_data_raw.copy()
             
             current_vars = [v for v in target_vars if v in task_data_analysis.columns]
             
             filtered_vars = analyze_task_data(task_data_analysis, task_level, current_vars)
             filtered_vars_per_task[task_level] = filtered_vars
             
-            # Prepare visualization data from raw, unmodified data
+            # Prepare visualization data from raw data
             viz_data = task_data_raw[['Subject', 'Env'] + filtered_vars].copy()
             viz_data['Task'] = task_level
             all_viz_data.append(viz_data)
