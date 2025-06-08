@@ -6,9 +6,8 @@ import seaborn as sns
 import logging
 import sys
 import pingouin as pg
-from scipy.stats import friedmanchisquare
 from scikit_posthocs import posthoc_conover
-from typing import List, Dict
+from typing import List
 from pathlib import Path
 from sklearn.preprocessing import PowerTransformer
 
@@ -126,20 +125,47 @@ Applied method: **{transforms.get(dv, 'none')}**
     report_path = save_dir / f"{dv}_report.md"
     report_path.write_text(report_content.strip(), encoding="utf-8")
     
-def generate_posthoc_report(task_level: str, nonparametric_path: Path, parametric_path: Path, env_labels: List[str]) -> None:
-    """Generate automated Markdown report with environment explanations"""
-    # Load results
+def generate_posthoc_report(task_level: str, 
+                           nonparametric_path: Path,
+                           parametric_path: Path,
+                           env_labels: List[str]) -> None:
+    """Generates comprehensive post-hoc analysis report with both parametric and non-parametric results.
+    
+    Workflow:
+    1. Load analysis results from CSV files
+    2. Identify significant/approaching results for both methods
+    3. Create method comparison table
+    4. Assemble report content with structured sections
+    5. Add post-hoc comparisons for both analysis types
+    6. Save final markdown report
+    """
+    
+    # Load analysis results from stored CSVs
     df_nonpara = pd.read_csv(nonparametric_path)
     df_para = pd.read_csv(parametric_path)
     
-    # Filter significant results
+    # ========================================================================
+    # Section 1: Significant Findings Identification
+    # ========================================================================
+    # Filter results using standard significance thresholds
     sig_nonpara = df_nonpara[df_nonpara['p-unc'] < 0.05]
-    approach_nonpara = df_nonpara[(df_nonpara['p-unc'] >= 0.05) & 
-                                 (df_nonpara['p-unc'] < 0.1)]
+    approach_nonpara = df_nonpara[(df_nonpara['p-unc'] >= 0.05) & (df_nonpara['p-unc'] < 0.1)]
     
-    # Create comparison table
+    sig_para = df_para[df_para['p-unc'] < 0.05]
+    approach_para = df_para[(df_para['p-unc'] >= 0.05) & (df_para['p-unc'] < 0.1)]
+
+    # ========================================================================
+    # Section 2: Method Agreement Analysis
+    # ========================================================================
+    # Compare only variables appearing in significant/approaching results
+    relevant_dvs = set(sig_nonpara['DV']).union(
+        approach_nonpara['DV'],
+        sig_para['DV'],
+        approach_para['DV']
+    )
+    
     comparison = []
-    for dv in set(sig_nonpara['DV']).union(approach_nonpara['DV']):
+    for dv in relevant_dvs:
         nonpara_row = df_nonpara[df_nonpara['DV'] == dv]
         para_row = df_para[df_para['DV'] == dv]
         
@@ -147,85 +173,136 @@ def generate_posthoc_report(task_level: str, nonparametric_path: Path, parametri
             'DV': dv,
             'Nonparametric_p': nonpara_row['p-unc'].values[0] if not nonpara_row.empty else np.nan,
             'Parametric_p': para_row['p-unc'].values[0] if not para_row.empty else np.nan,
-            'Significance': 'Consistent' if (
+            'Agreement': 'Consistent' if (
                 nonpara_row['p-unc'].values[0] < 0.05 and 
                 para_row['p-unc'].values[0] < 0.05
             ) else 'Discrepancy'
         }
         comparison.append(comp_entry)
-    
-    # Generate markdown content
+
+    # ========================================================================
+    # Section 3: Report Content Assembly
+    # ========================================================================
     md_content = f"""## Post-Hoc Analysis Report ({task_level})
 
 ### Environment Definitions
-| Label | Condition Description |
-|-------|-----------------------|
-| {env_labels[0]} | Base Unity scene |
-| {env_labels[1]} | Natural environment |
-| {env_labels[2]} | Urban environment |
+| Label    | Description           |
+|----------|-----------------------|
+| {env_labels[0]:<8} | Baseline condition    |
+| {env_labels[1]:<8} | Experimental group 1  |
+| {env_labels[2]:<8} | Experimental group 2  |
 
-### Significant Nonparametric Results
-{sig_nonpara[['DV', 'p-unc', 'W', 'Q']].to_markdown(index=False, floatfmt=".4f")}
+### 1. Significant Nonparametric Results (Friedman Test)
+| Variable           |   p-value |   W Stat |   Q Stat |
+|--------------------|----------:|---------:|---------:|"""
 
-### Parametric vs Nonparametric Comparison
-| Dependent Variable | Nonparametric p | Parametric p | Agreement |
-|--------------------|------------------|--------------|-----------|
-"""
-    for row in comparison:
-        md_content += f"| {row['DV']} | {row['Nonparametric_p']:.4f} | {row['Parametric_p']:.4f} | {row['Significance']} |\n"
+    # Populate nonparametric results table
+    for _, row in sig_nonpara.iterrows():
+        md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
 
-    # Add post-hoc results if available
+    # ========================================================================
+    # Section 4: Approaching Significance
+    # ========================================================================
+    md_content += "\n\n### 2. Nonparametric Approaching Significance"
+    if not approach_nonpara.empty:
+        md_content += "\n| Variable           |   p-value |   W Stat |   Q Stat |"
+        md_content += "\n|--------------------|----------:|---------:|---------:|"
+        for _, row in approach_nonpara.iterrows():
+            md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
+    else:
+        md_content += "\n*No variables approaching significance*"
+
+    # ========================================================================
+    # Section 5: Parametric Results
+    # ========================================================================
+    md_content += "\n\n### 3. Significant Parametric Results (RM ANOVA)"
+    md_content += "\n| Variable           |   p-value |   F Value |   Effect Size (η²) |"
+    md_content += "\n|--------------------|----------:|----------:|-------------------:|"
+    for _, row in sig_para.iterrows():
+        md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['F']:>9.4f} | {row['ng2']:>18.4f} |"
+
+    md_content += "\n\n### 4. Parametric Approaching Significance"
+    if not approach_para.empty:
+        md_content += "\n| Variable           |   p-value |   F Value |   Effect Size (η²) |"
+        md_content += "\n|--------------------|----------:|----------:|-------------------:|"
+        for _, row in approach_para.iterrows():
+            md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['F']:>9.4f} | {row['ng2']:>18.4f} |"
+    else:
+        md_content += "\n*No variables approaching significance*"
+
+    # ========================================================================
+    # Section 6: Method Comparison
+    # ========================================================================
+    md_content += """\n\n### 5. Method Agreement Analysis
+| Variable            | Nonparametric p | Parametric p | Agreement     |
+|---------------------|-----------------:|-------------:|--------------:|"""
+    for row in sorted(comparison, key=lambda x: x['DV']):
+        md_content += f"\n| {row['DV']:<19} | {row['Nonparametric_p']:>15.4f} | {row['Parametric_p']:>11.4f} | {row['Agreement']:>13} |"
+
+    # ========================================================================
+    # Section 7: Post-Hoc Comparisons
+    # ========================================================================
+    # Nonparametric Conover post-hocs
     posthoc_path = nonparametric_path.parent / 'posthoc_conover.csv'
     if posthoc_path.exists():
         posthoc_df = pd.read_csv(posthoc_path)
-        # Remove duplicate comparisons and self-tests
         posthoc_df = posthoc_df[
             (posthoc_df['Env1'] < posthoc_df['Env2']) & 
             (posthoc_df['Env1'] != posthoc_df['Env2'])
         ]
         
-        md_content += "\n### Post-Hoc Pairwise Comparisons\n"
+        md_content += "\n\n### 6. Nonparametric Post-Hoc Comparisons (Conover's Test)"
         for dv in posthoc_df['DV'].unique():
-            md_content += f"#### {dv}\n"
-            dv_df = posthoc_df[posthoc_df['DV'] == dv].copy()         
-            # Add mean differences
-            data = pd.read_csv(DATA_PATH)
-            means = data.groupby('Env')[dv].mean().round(2)
+            md_content += f"\n#### {dv}"
+            dv_df = posthoc_df[posthoc_df['DV'] == dv].copy()
+            
+            # Calculate environment means from analysis data
+            analysis_data = pd.read_csv(nonparametric_path.parent.parent / f"{task_level}_data.csv")
+            means = analysis_data.groupby('Env')[dv].mean().round(2)
+            
             dv_df['Means'] = dv_df.apply(
-                lambda row: f"{means[row['Env1']]} vs {means[row['Env2']]}",
+                lambda row: f"{means[row['Env1']]} vs {means[row['Env2']]}", 
                 axis=1
-            )            
-            md_content += dv_df[['Means', 'Env1', 'Env2', 'p_value', 'Significance']]\
-                .to_markdown(index=False, floatfmt=".4f") + "\n\n"
-                
-    # Add parametric post-hoc results
+            )
+            
+            md_content += """
+| Comparison         | Environments |   p-value | Significance |
+|--------------------|--------------|----------:|--------------|"""
+            for _, row in dv_df.iterrows():
+                md_content += f"\n| {row['Means']:<18} | {row['Env1']}-{row['Env2']:<5} | {row['p_value']:>8.4f} | {row['Significance']:>12} |"
+
+    # Parametric post-hoc comparisons
     para_posthoc_path = parametric_path.parent / 'posthoc_parametric.csv'
     if para_posthoc_path.exists():
         try:
             para_ph = pd.read_csv(para_posthoc_path)
-            # Check if required columns exist
-            required_cols = ['Env1', 'Env2', 'p-corr', 'cohen-d']
-            if all(col in para_ph.columns for col in required_cols):
-                md_content += "\n### Parametric Post-Hoc Comparisons (Bonferroni-corrected)\n"
+            # Check for required columns and non-empty data
+            required_cols = ['Env1', 'Env2', 'p-corr', 'cohen-d', 'DV', 'Significance']
+            if not para_ph.empty and all(col in para_ph.columns for col in required_cols):
+                md_content += "\n\n### 7. Parametric Post-Hoc Comparisons (Bonferroni-corrected)"
                 for dv in para_ph['DV'].unique():
-                    md_content += f"#### {dv}\n"
+                    md_content += f"\n#### {dv}"
                     dv_df = para_ph[para_ph['DV'] == dv].copy()
-                    # Convert p-corr to numeric
-                    dv_df['p-corr'] = pd.to_numeric(dv_df['p-corr'], errors='coerce')
-                    dv_df = dv_df.rename(columns={
-                        'p-corr': 'p_value',
-                        'cohen-d': 'Effect_Size'
-                    })
-                    md_content += dv_df[['Env1', 'Env2', 'p_value', 'Effect_Size']]\
-                        .to_markdown(index=False, floatfmt=".4f") + "\n\n"
+                    
+                    md_content += """
+| Environments |   p-value | Cohen's d | Significance |
+|--------------|----------:|----------:|--------------|"""
+                    for _, row in dv_df.iterrows():
+                        md_content += f"\n| {row['Env1']}-{row['Env2']:<5} | {row['p-corr']:>8.4f} | {row['cohen-d']:>9.4f} | {row['Significance']:>12} |"
             else:
-                logging.warning(f"Missing columns in {para_posthoc_path}")
+                logging.warning(f"Skipping empty/malformed parametric post-hoc: {para_posthoc_path}")
+                
         except Exception as e:
             logging.error(f"Failed to process parametric post-hoc: {str(e)}")
 
+    # ========================================================================
+    # Final Output
+    # ========================================================================
     report_path = nonparametric_path.parent.parent / 'posthoc_analyses.md'
-    report_path.write_text(md_content)
+    report_path.write_text(md_content, encoding='utf-8')
     logging.info(f"Generated post-hoc report at {report_path}")
+
+
     
 def friedman_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
     results = []
@@ -277,8 +354,12 @@ def parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> p
             ph = ph.rename(columns={
                 'A': 'Env1',
                 'B': 'Env2',
-                'hedges': 'cohen-d'  # Match effect size column name
+                'hedges': 'cohen-d'
             })
+            # Add significance markers
+            ph['Significance'] = ph['p-corr'].apply(
+                lambda x: '**' if x < 0.05 else 'ns'
+            )
             ph['DV'] = dv
             ph['Task'] = task_level
             results.append(ph)
@@ -309,6 +390,9 @@ def analyze_task_data(data: pd.DataFrame,
     para_path = parametric_dir / 'analysis_parametric.csv'
     nonpara_path = nonparametric_dir / 'analysis_nonparametric.csv'
     
+    # Save task-specific data for reporting
+    data.to_csv(RESULTS_DIR / task_level / f"{task_level}_data.csv", index=False)
+        
     # Add tracking variables
     parametric_candidates = []
     nonparametric_only = []
