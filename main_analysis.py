@@ -81,7 +81,7 @@ def generate_report(assumptions, transforms, dv, task_level, save_dir, analysis_
     report_content = f"""
 ## Analysis Report: {dv} ({task_level})
 ### Data Transformations
-Applied method: **{transforms.get('method', 'none')}**
+Applied method: **{transforms.get(dv, 'none')}**
 
 ### Assumption Checks
 1. **DV Normality (Shapiro-Wilk)**
@@ -101,7 +101,7 @@ Applied method: **{transforms.get('method', 'none')}**
 
     eligibility_status = "Eligible for parametric analysis" if assumptions['valid'] else "Ineligible for parametric analysis"
     
-    report_content += f"""
+    report_content += f"""\n
 **Analysis Type:** {analysis_type.title()}
 **Eligibility Status:** {eligibility_status}"""
 
