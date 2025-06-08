@@ -185,13 +185,13 @@ def generate_posthoc_report(task_level: str,
 ### Environment Definitions
 | Label    | Description           |
 |----------|-----------------------|
-| {env_labels[0]:<8} | Baseline condition    |
-| {env_labels[1]:<8} | Experimental group 1  |
-| {env_labels[2]:<8} | Experimental group 2  |
+| {env_labels[0]:<8} | Base Unity Environment|
+| {env_labels[1]:<8} | Nature Environment    |
+| {env_labels[2]:<8} | Urban Environment     |
 
 ### 1. Significant Nonparametric Results (Friedman Test)
 | Variable           |   p-value |   W Stat |   Q Stat |
-|--------------------|----------:|---------:|---------:|"""
+|--------------------|-----------|----------|----------|"""
 
     # Populate nonparametric results table
     for _, row in sig_nonpara.iterrows():
@@ -202,7 +202,7 @@ def generate_posthoc_report(task_level: str,
     md_content += "\n\n### 2. Nonparametric Approaching Significance"
     if not approach_nonpara.empty:
         md_content += "\n| Variable           |   p-value |   W Stat |   Q Stat |"
-        md_content += "\n|--------------------|----------:|---------:|---------:|"
+        md_content += "\n|--------------------|-----------|----------|----------|"
         for _, row in approach_nonpara.iterrows():
             md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
     else:
@@ -212,14 +212,14 @@ def generate_posthoc_report(task_level: str,
 
     md_content += "\n\n### 3. Significant Parametric Results (RM ANOVA)"
     md_content += "\n| Variable           |   p-value |   F Value |   Effect Size (η²) |"
-    md_content += "\n|--------------------|----------:|----------:|-------------------:|"
+    md_content += "\n|--------------------|-----------|-----------|--------------------|"
     for _, row in sig_para.iterrows():
         md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['F']:>9.4f} | {row['ng2']:>18.4f} |"
 
     md_content += "\n\n### 4. Parametric Approaching Significance"
     if not approach_para.empty:
         md_content += "\n| Variable           |   p-value |   F Value |   Effect Size (η²) |"
-        md_content += "\n|--------------------|----------:|----------:|-------------------:|"
+        md_content += "\n|--------------------|-----------|-----------|--------------------|"
         for _, row in approach_para.iterrows():
             md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['F']:>9.4f} | {row['ng2']:>18.4f} |"
     else:
@@ -229,7 +229,7 @@ def generate_posthoc_report(task_level: str,
 
     md_content += """\n\n### 5. Method Agreement Analysis
 | Variable            | Nonparametric p | Parametric p | Agreement     |
-|---------------------|-----------------:|-------------:|--------------:|"""
+|---------------------|-----------------|--------------|---------------|"""
     for row in sorted(comparison, key=lambda x: x['DV']):
         md_content += f"\n| {row['DV']:<19} | {row['Nonparametric_p']:>15.4f} | {row['Parametric_p']:>11.4f} | {row['Agreement']:>13} |"
 
@@ -261,7 +261,7 @@ def generate_posthoc_report(task_level: str,
             
             md_content += """
 | Comparison         | Environments |   p-value | Significance |
-|--------------------|--------------|----------:|--------------|"""
+|--------------------|--------------|-----------|--------------|"""
             for _, row in dv_df.iterrows():
                 md_content += f"\n| {row['Means']:<18} | {row['Env1']}-{row['Env2']:<5} | {row['p_value']:>8.4f} | {row['Significance']:>12} |"
 
@@ -280,7 +280,7 @@ def generate_posthoc_report(task_level: str,
                     
                     md_content += """
 | Environments |   p-value | Cohen's d | Significance |
-|--------------|----------:|----------:|--------------|"""
+|--------------|-----------|-----------|--------------|"""
                     for _, row in dv_df.iterrows():
                         md_content += f"\n| {row['Env1']}-{row['Env2']:<5} | {row['p-corr']:>8.4f} | {row['cohen-d']:>9.4f} | {row['Significance']:>12} |"
             else:
@@ -291,7 +291,7 @@ def generate_posthoc_report(task_level: str,
 
 
     # Final Output
-    report_path = nonparametric_path.parent.parent / 'posthoc_analyses.md'
+    report_path = nonparametric_path.parent.parent / 'analyses_results.md'
     report_path.write_text(md_content, encoding='utf-8')
     logging.info(f"Generated post-hoc report at {report_path}")
 
@@ -509,8 +509,59 @@ def analyze_task_data(data: pd.DataFrame,
         parametric_path=para_path,
         env_labels=env_labels
     )
+    
+    # Save task-specific data for reporting
+    task_dir = RESULTS_DIR / task_level
+    data.to_csv(task_dir / f"{task_level}_data.csv", index=False)
+    
+    # Add correlation analysis
+    generate_correlation_matrix(data, task_dir)
 
     return filtered_vars
+
+def generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
+    """Generate and save correlation matrix for task-specific DVs"""
+    try:
+        # Select only numeric DV columns
+        numeric_cols = task_data.select_dtypes(include=np.number).columns.tolist()
+        dvs = [col for col in numeric_cols if col not in ['Subject', 'Env', 'N']]
+        
+        if not dvs:
+            logging.warning(f"No valid DVs for correlation matrix in {task_dir.name}")
+            return
+
+        # Calculate correlations
+        corr_matrix = task_data[dvs].corr(method='pearson')
+        
+        # Save correlation matrix
+        matrix_path = task_dir / 'correlation_matrix.csv'
+        corr_matrix.to_csv(matrix_path)
+        logging.info(f"Saved correlation matrix to {matrix_path}")
+
+        # Create visualization
+        plt.figure(figsize=(12, 10))
+        sns.heatmap(
+            corr_matrix,
+            annot=True,
+            fmt=".2f",
+            cmap='coolwarm',
+            center=0,
+            square=True,
+            linewidths=0.5,
+            cbar_kws={"shrink": 0.8}
+        )
+        plt.title(f"DV Correlation Matrix ({task_dir.name})", pad=20)
+        plt.xticks(rotation=45, ha='right')
+        plt.yticks(rotation=0)
+        
+        # Save plot
+        plot_path = task_dir / 'correlation_matrix.png'
+        plt.savefig(plot_path, bbox_inches='tight', dpi=300)
+        plt.close()
+        logging.info(f"Saved correlation plot to {plot_path}")
+
+    except Exception as e:
+        logging.error(f"Correlation matrix generation failed: {str(e)}")
 
 def generate_combined_visualizations(combined_data, dvs):
     """Create unified visualizations"""
