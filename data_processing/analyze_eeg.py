@@ -43,9 +43,9 @@ def _calculate_band_power(raw):
     artifact_ratio = (bad_samples / raw.n_times) if raw.n_times > 0 else 0.0
         
     # Calculate power spectra while rejecting the motion artifact periods
-    psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=4, fmax=7, n_fft= sfreq, method='welch', reject_by_annotation=True)
+    psd_frontal_theta = raw.copy().pick(frontal_chs).compute_psd(fmin=5, fmax=7, n_fft= sfreq, method='welch', reject_by_annotation=True)
     psd_parietal_alpha = raw.copy().pick(parietal_chs).compute_psd(fmin=8, fmax=13, n_fft=sfreq, method='welch', reject_by_annotation=True)
-    psd_global_theta = raw.copy().pick(available_channels).compute_psd(fmin=4, fmax=7, n_fft=sfreq, method='welch', reject_by_annotation=True)
+    psd_global_theta = raw.copy().pick(available_channels).compute_psd(fmin=5, fmax=7, n_fft=sfreq, method='welch', reject_by_annotation=True)
     psd_global_alpha = raw.copy().pick(available_channels).compute_psd(fmin=8, fmax=13, n_fft=sfreq, method='welch', reject_by_annotation=True)
     psd_global_beta = raw.copy().pick(available_channels).compute_psd(fmin=14, fmax=30, n_fft=sfreq, method='welch', reject_by_annotation=True)
     

@@ -155,7 +155,7 @@ def _create_raw(stream):
     sfreq = float(stream["info"]["nominal_srate"][0])
     ch_names = "AF3,AF4,F3,Fz,F4,P3,Pz,P4".split(',')[:eeg_data.shape[0]]
     
-    # Create info with standard electrode positions
+    # Create info with standard electrode positions to cover Enobio 8 setup
     info = mne.create_info(ch_names, sfreq, 'eeg')
     info.set_montage('standard_1005', match_case=False)
     
@@ -164,7 +164,7 @@ def _create_raw(stream):
 def _basic_filtering(raw):
     """Apply primary step-basic filtering"""
     # Bandpass filter for project compatibility (preserve theta, alpha, beta)
-    raw.filter(4, 30, fir_design='firwin')
+    raw.filter(4, 31, fir_design='firwin')
     
     # Notch filter
     raw.notch_filter(50)
