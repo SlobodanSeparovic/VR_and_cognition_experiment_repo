@@ -6,6 +6,9 @@ import seaborn as sns
 import logging
 import sys
 import pingouin as pg
+from scipy.stats import friedmanchisquare
+from scikit_posthocs import posthoc_conover
+from typing import List, Dict
 from pathlib import Path
 from sklearn.preprocessing import PowerTransformer
 
@@ -122,19 +125,136 @@ Applied method: **{transforms.get(dv, 'none')}**
 
     report_path = save_dir / f"{dv}_report.md"
     report_path.write_text(report_content.strip(), encoding="utf-8")
+    
+def generate_posthoc_report(task_level: str, nonparametric_path: Path, parametric_path: Path, env_labels: List[str]) -> None:
+    """Generate automated Markdown report with environment explanations"""
+    # Load results
+    df_nonpara = pd.read_csv(nonparametric_path)
+    df_para = pd.read_csv(parametric_path)
+    
+    # Filter significant results
+    sig_nonpara = df_nonpara[df_nonpara['p-unc'] < 0.05]
+    approach_nonpara = df_nonpara[(df_nonpara['p-unc'] >= 0.05) & 
+                                 (df_nonpara['p-unc'] < 0.1)]
+    
+    # Create comparison table
+    comparison = []
+    for dv in set(sig_nonpara['DV']).union(approach_nonpara['DV']):
+        nonpara_row = df_nonpara[df_nonpara['DV'] == dv]
+        para_row = df_para[df_para['DV'] == dv]
+        
+        comp_entry = {
+            'DV': dv,
+            'Nonparametric_p': nonpara_row['p-unc'].values[0] if not nonpara_row.empty else np.nan,
+            'Parametric_p': para_row['p-unc'].values[0] if not para_row.empty else np.nan,
+            'Significance': 'Consistent' if (
+                nonpara_row['p-unc'].values[0] < 0.05 and 
+                para_row['p-unc'].values[0] < 0.05
+            ) else 'Discrepancy'
+        }
+        comparison.append(comp_entry)
+    
+    # Generate markdown content
+    md_content = f"""## Post-Hoc Analysis Report ({task_level})
 
-def analyze_task_data(data, task_level, variables):
-    """Core analysis workflow with proper type separation"""
+### Environment Definitions
+| Label | Condition Description |
+|-------|-----------------------|
+| {env_labels[0]} | Base Unity scene |
+| {env_labels[1]} | Natural environment |
+| {env_labels[2]} | Urban environment |
+
+### Significant Nonparametric Results
+{sig_nonpara[['DV', 'p-unc', 'W', 'Q']].to_markdown(index=False, floatfmt=".4f")}
+
+### Parametric vs Nonparametric Comparison
+| Dependent Variable | Nonparametric p | Parametric p | Agreement |
+|--------------------|------------------|--------------|-----------|
+"""
+    for row in comparison:
+        md_content += f"| {row['DV']} | {row['Nonparametric_p']:.4f} | {row['Parametric_p']:.4f} | {row['Significance']} |\n"
+
+    # Add post-hoc results if available
+    posthoc_path = nonparametric_path.parent / 'posthoc_conover.csv'
+    if posthoc_path.exists():
+        posthoc_df = pd.read_csv(posthoc_path)
+        # Remove duplicate comparisons and self-tests
+        posthoc_df = posthoc_df[
+            (posthoc_df['Env1'] < posthoc_df['Env2']) & 
+            (posthoc_df['Env1'] != posthoc_df['Env2'])
+        ]
+        
+        md_content += "\n### Post-Hoc Pairwise Comparisons\n"
+        for dv in posthoc_df['DV'].unique():
+            md_content += f"#### {dv}\n"
+            dv_df = posthoc_df[posthoc_df['DV'] == dv]
+            
+            # Add mean differences
+            data = pd.read_csv(DATA_PATH)
+            means = data.groupby('Env')[dv].mean().round(2)
+            dv_df['Means'] = dv_df.apply(
+                lambda row: f"{means[row['Env1']]} vs {means[row['Env2']]}",
+                axis=1
+            )
+            
+            md_content += dv_df[['Means', 'Env1', 'Env2', 'p_value', 'Significance']]\
+                .to_markdown(index=False, floatfmt=".4f") + "\n\n"
+
+    report_path = nonparametric_path.parent / 'posthoc_nonparametric.md'
+    report_path.write_text(md_content)
+    logging.info(f"Generated post-hoc report at {report_path}")
+    
+def friedman_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
+    results = []
+    for dv in dvs:
+        # Get unique environments
+        envs = sorted(data['Env'].unique())
+        
+        # Generate comparison matrix
+        ph = posthoc_conover(
+            data, 
+            val_col=dv, 
+            group_col='Env', 
+            p_adjust='bonf'
+        )
+        
+        # Convert to long format and filter valid pairs
+        ph_long = ph.stack().reset_index()
+        ph_long.columns = ['Env1', 'Env2', 'p_value']
+        ph_long = ph_long[ph_long['Env1'] != ph_long['Env2']]  # Remove self-comparisons
+        
+        # Remove duplicate pairs (A vs B == B vs A)
+        ph_long = ph_long[ph_long['Env1'] < ph_long['Env2']]
+        
+        ph_long['DV'] = dv
+        ph_long['Task'] = task_level
+        ph_long['Significance'] = ph_long['p_value'].apply(
+            lambda x: '**' if x < 0.05 else 'ns'
+        )
+        results.append(ph_long)
+    
+    return pd.concat(results) if results else pd.DataFrame()
+
+
+def analyze_task_data(data: pd.DataFrame, 
+                     task_level: str, 
+                     variables: List[str]) -> List[str]:
+    """Core analysis workflow with automated reporting"""
     parametric_dir = RESULTS_DIR / task_level / 'parametric'
     nonparametric_dir = RESULTS_DIR / task_level / 'nonparametric'
-    parametric_dir.mkdir(parents=True, exist_ok=True)
-    nonparametric_dir.mkdir(parents=True, exist_ok=True)
     
     filtered_vars = filter_dvs_by_missing(data, variables, task_level)
     
     parametric_results = []
     nonparametric_results = []
     transformations = {}
+    
+    # Get actual environment labels from data
+    env_labels = sorted(data['Env'].unique())
+    
+    # Initialize paths
+    para_path = parametric_dir / 'analysis_parametric.csv'
+    nonpara_path = nonparametric_dir / 'analysis_nonparametric.csv'
     
     # Add tracking variables
     parametric_candidates = []
@@ -228,6 +348,23 @@ def analyze_task_data(data, task_level, variables):
     
     if nonparametric_only:
         logging.info(f"{task_level} variables requiring non-parametric analysis: {', '.join(nonparametric_only)}")
+
+    # Perform post-hoc analysis
+    sig_dvs = [row['DV'] for _, row in pd.read_csv(nonpara_path).iterrows() 
+              if row['p-unc'] < 0.05]
+    if sig_dvs:
+        posthoc_df = friedman_posthoc(data, task_level, sig_dvs)
+        posthoc_path = nonparametric_dir / 'posthoc_conover.csv'
+        posthoc_df.to_csv(posthoc_path, index=False)
+        logging.info(f"Saved post-hoc results to {posthoc_path}")
+    
+    # Generate comparative report
+    generate_posthoc_report(
+        task_level=task_level,
+        nonparametric_path=nonpara_path,
+        parametric_path=para_path,
+        env_labels=env_labels
+    )
 
     return filtered_vars
 
