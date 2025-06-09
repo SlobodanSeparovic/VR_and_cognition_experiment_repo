@@ -83,14 +83,14 @@ def generate_report(assumptions, transforms, dv, task_level, save_dir, analysis_
     report_content = f"""
 ## Analysis Report: {dv} ({task_level})
 ### Data Transformations
-Applied method: **{transforms.get(dv, 'none')}**
-**Interpretation:** Transformations adjust data distribution to meet parametric assumptions. Yeo-Johnson preserves sign while handling zero/negative values.
+Applied method: *{transforms.get(dv, 'none')}*
+*Interpretation:* Transformations adjust data distribution to meet parametric assumptions. Yeo-Johnson preserves sign while handling zero/negative values.
 
 ### Assumption Checks
-1. **DV Normality (Shapiro-Wilk)**
+1. *DV Normality (Shapiro-Wilk)*
    - p-value: {assumptions['normality_pval']:.4f}
    - Passed: {'Yes' if assumptions['normality_passed'] else 'No'}
-**Interpretation:** Tests if data follows normal distribution (null hypothesis assumes normal distribution). p > 0.05 does not reject null hypothesis."""
+*Interpretation:* Tests if data follows normal distribution (null hypothesis assumes normal distribution). p > 0.05 does not reject null hypothesis."""
 
     if analysis_type == 'parametric':
         gg_applied = assumptions['epsilon_gg'] < 0.75
@@ -98,11 +98,11 @@ Applied method: **{transforms.get(dv, 'none')}**
         correction = 'GG' if gg_applied else 'HF' if hf_applied else 'None'
         
         report_content += f"""
-2. **Sphericity Handling**
+2. *Sphericity Handling*
    - Mauchly's p-value: {assumptions['sphericity_pval']:.4f}
    - Greenhouse-Geisser epsilon: {assumptions['epsilon_gg']:.3f}
    - Correction Applied: {correction}
-**Interpretation:** Sphericity requires equal variance differences between conditions. epsilon < 1 indicates violation, requiring correction."""
+*Interpretation:* Sphericity requires equal variance differences between conditions. epsilon < 1 indicates violation, requiring correction."""
 
         if aov is not None:
             if 'F' in aov.columns and 'ddof1' in aov.columns and 'ddof2' in aov.columns:
@@ -111,25 +111,25 @@ Applied method: **{transforms.get(dv, 'none')}**
                 df2 = aov['ddof2'].values[0]
                 eta_sq = (f_val * df1) / (f_val * df1 + df2)
                 report_content += f"""
-3. **Effect Size**
-   - **Partial eta-squared:** {eta_sq:.3f}
-**Interpretation:** Proportion of variance explained by factor."""
+3. *Effect Size*
+   - *Partial eta-squared:* {eta_sq:.3f}
+*Interpretation:* Proportion of variance explained by factor."""
 
     eligibility_status = "Eligible for parametric analysis." if assumptions['valid'] else "Ineligible for parametric analysis."
     
     report_content += f"""\n
-**Analysis Type:** {analysis_type.title()}
-**Eligibility Status:** {eligibility_status}
-**Note:** Parametric eligibility requires passed normality (p ≥ 0.05) and sphericity (p ≥ 0.05 or corrected)."""
+*Analysis Type:* {analysis_type.title()}
+*Eligibility Status:* {eligibility_status}
+*Note:* Parametric eligibility requires passed normality (p ≥ 0.05) and sphericity (p ≥ 0.05 or corrected)."""
 
     report_path = save_dir / f"{dv}_report.md"
     report_path.write_text(report_content.strip(), encoding="utf-8")
     
-def generate_posthoc_report(task_level: str, 
+def generate_final_report(task_level: str, 
                            nonparametric_path: Path,
                            parametric_path: Path,
                            env_labels: List[str]) -> None:
-    """Generates comprehensive post-hoc analysis report with both parametric and non-parametric results.
+    """Generates comprehensive final analysis report with both parametric and non-parametric results.
     
     Workflow:
     1. Load analysis results from CSV files
@@ -180,58 +180,58 @@ def generate_posthoc_report(task_level: str,
 
     # Section 3: Report Content Assembly
 
-    md_content = f"""## Post-Hoc Analysis Report ({task_level})
+    md_content = f"""## Final Analysis Report ({task_level})
 
 ### Environment Definitions
-| Label    | Description           |
+|  Label   |     Description       |
 |----------|-----------------------|
 | {env_labels[0]:<8} | Base Unity Environment|
 | {env_labels[1]:<8} | Nature Environment    |
 | {env_labels[2]:<8} | Urban Environment     |
 
 ### 1. Significant Nonparametric Results (Friedman Test)
-| Variable           |   p-value |   W Stat |   Q Stat |
+|      Variable      |  p-value  |  W Stat  |  Q Stat  |
 |--------------------|-----------|----------|----------|"""
 
     # Populate nonparametric results table
     for _, row in sig_nonpara.iterrows():
-        md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
+        md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>9.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
 
     # Section 4: Approaching Significance
 
     md_content += "\n\n### 2. Nonparametric Approaching Significance"
     if not approach_nonpara.empty:
-        md_content += "\n| Variable           |   p-value |   W Stat |   Q Stat |"
+        md_content += "\n|      Variable      |   p-value |  W Stat  |  Q Stat  |"
         md_content += "\n|--------------------|-----------|----------|----------|"
         for _, row in approach_nonpara.iterrows():
-            md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
+            md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>9.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
     else:
         md_content += "\n*No variables approaching significance*"
 
     # Section 5: Parametric Results
 
     md_content += "\n\n### 3. Significant Parametric Results (RM ANOVA)"
-    md_content += "\n| Variable           |   p-value |   F Value |   Effect Size (η²) |"
-    md_content += "\n|--------------------|-----------|-----------|--------------------|"
+    md_content += "\n|      Variable      |  p-value  |  F Value  | η²(Generalized) |"
+    md_content += "\n|--------------------|-----------|-----------|-----------------|"
     for _, row in sig_para.iterrows():
-        md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['F']:>9.4f} | {row['ng2']:>18.4f} |"
+        md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>9.4f} | {row['F']:>9.4f} | {row['ng2']:>15.4f} |"
 
     md_content += "\n\n### 4. Parametric Approaching Significance"
     if not approach_para.empty:
-        md_content += "\n| Variable           |   p-value |   F Value |   Effect Size (η²) |"
-        md_content += "\n|--------------------|-----------|-----------|--------------------|"
+        md_content += "\n|      Variable      |  p-value  |  F Value  | η²(Generalized) |"
+        md_content += "\n|--------------------|-----------|-----------|-----------------|"
         for _, row in approach_para.iterrows():
-            md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>8.4f} | {row['F']:>9.4f} | {row['ng2']:>18.4f} |"
+            md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>9.4f} | {row['F']:>9.4f} | {row['ng2']:>15.4f} |"
     else:
         md_content += "\n*No variables approaching significance*"
 
     # Section 6: Method Comparison
 
     md_content += """\n\n### 5. Method Agreement Analysis
-| Variable            | Nonparametric p | Parametric p | Agreement     |
+|      Variable       | Nonparametric p | Parametric p |   Agreement   |
 |---------------------|-----------------|--------------|---------------|"""
     for row in sorted(comparison, key=lambda x: x['DV']):
-        md_content += f"\n| {row['DV']:<19} | {row['Nonparametric_p']:>15.4f} | {row['Parametric_p']:>11.4f} | {row['Agreement']:>13} |"
+        md_content += f"\n| {row['DV']:<19} | {row['Nonparametric_p']:>15.4f} | {row['Parametric_p']:>12.4f} | {row['Agreement']:>13} |"
 
 
     # Section 7: Post-Hoc Comparisons
@@ -260,10 +260,10 @@ def generate_posthoc_report(task_level: str,
             )
             
             md_content += """
-| Comparison         | Environments |   p-value | Significance |
-|--------------------|--------------|-----------|--------------|"""
+| Comparison of means |  Environments  |  p-value  | Significance |
+|---------------------|----------------|-----------|--------------|"""
             for _, row in dv_df.iterrows():
-                md_content += f"\n| {row['Means']:<18} | {row['Env1']}-{row['Env2']:<5} | {row['p_value']:>8.4f} | {row['Significance']:>12} |"
+                md_content += f"\n| {row['Means']:<19} | {row['Env1']:7}-{row['Env2']:6} | {row['p_value']:>9.4f} | {row['Significance']:>12} |"
 
     # Parametric post-hoc comparisons
     para_posthoc_path = parametric_path.parent / 'posthoc_parametric.csv'
@@ -279,21 +279,35 @@ def generate_posthoc_report(task_level: str,
                     dv_df = para_ph[para_ph['DV'] == dv].copy()
                     
                     md_content += """
-| Environments |   p-value | Cohen's d | Significance |
-|--------------|-----------|-----------|--------------|"""
+|  Environments  |   p-value | Cohen's d | Significance |
+|----------------|-----------|-----------|--------------|"""
                     for _, row in dv_df.iterrows():
-                        md_content += f"\n| {row['Env1']}-{row['Env2']:<5} | {row['p-corr']:>8.4f} | {row['cohen-d']:>9.4f} | {row['Significance']:>12} |"
+                        md_content += f"\n| {row['Env1']:7}-{row['Env2']:6} | {row['p-corr']:>9.4f} | {row['cohen-d']:>9.4f} | {row['Significance']:>12} |"
             else:
                 logging.warning(f"Skipping empty/malformed parametric post-hoc: {para_posthoc_path}")
                 
         except Exception as e:
             logging.error(f"Failed to process parametric post-hoc: {str(e)}")
 
+    md_content += """\n
+*Statistical Interpretation Note:*
+- *Friedman Test:*  
+  - W Stat: Kendall’s coefficient (0–1) measuring agreement in ranks. Small: <0.3, Medium: 0.3–0.5, Large: ≥0.5  
+  - Q Stat: Friedman’s chi-square statistic testing overall group differences  
+- *RM ANOVA:*  
+  - F Value: Ratio of between-group to within-group variance  
+  - η² (Generalized): Generalized eta squared represents measure of variance explained by environment.
+                      Small: 0.01, Medium: 0.06, Large: ≥0.14  
+- *Post-Hoc Comparisons:* 
+  - p-values: Bonferroni-adjusted significance thresholds (α=0.05)  
+  - Cohen’s d: Standardized mean difference. Small: 0.2, Medium: 0.5, Large: ≥0.8  
+  - Significance: **: p<0.05 d; ns: p≥0.05 
+- *Method Agreement:* Compares parametric and nonparametric p-value consistency"""
 
     # Final Output
     report_path = nonparametric_path.parent.parent / 'analyses_results.md'
     report_path.write_text(md_content, encoding='utf-8')
-    logging.info(f"Generated post-hoc report at {report_path}")
+    logging.info(f"Generated final report at {report_path}")
 
 
     
@@ -359,9 +373,6 @@ def parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> p
         except Exception as e:
             logging.error(f"Parametric post-hoc failed for {dv}: {str(e)}")
     return pd.concat(results) if results else pd.DataFrame()
-
-
-
 
 def analyze_task_data(data: pd.DataFrame, 
                      task_level: str, 
@@ -503,7 +514,7 @@ def analyze_task_data(data: pd.DataFrame,
             logging.info(f"Saved parametric post-hoc results to {para_posthoc_path}")
     
     # Generate comparative report
-    generate_posthoc_report(
+    generate_final_report(
         task_level=task_level,
         nonparametric_path=nonpara_path,
         parametric_path=para_path,
@@ -599,6 +610,59 @@ def generate_combined_visualizations(combined_data, dvs):
         
         plt.savefig(combined_dir / f"combined_{dv}.png", bbox_inches='tight', dpi=300)
         plt.close()
+        
+def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
+    """    Generates a markdown report with basic statistics on motion artifacts,
+    stratified by baseline (N=0) and experiment (N=2,3)."""
+    # Load data
+    df = pd.read_csv(data_path)
+    logging.info(f"Loaded motion artifact data from {data_path}")
+    
+    # Define report sections
+    report = []
+    
+    # All data
+    overall_stats = df['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
+    report.append("## Motion Artifact Statistics (All Conditions)")
+    report.append("| Statistic |  Value  |")
+    report.append("|-----------|---------|")
+    for idx, val in overall_stats.items():
+        report.append(f"| {idx:9} | {val:7} |")
+    logging.info("Computed overall motion artifact statistics")
+    
+    # Baseline (N=0)
+    baseline = df[df['N'] == 0.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
+    report.append("\n## Baseline (N=0)")
+    report.append("| Statistic |  Value  |")
+    report.append("|-----------|---------|")
+    for idx, val in baseline.items():
+        report.append(f"| {idx:9} | {val:7} |")
+    logging.info("Computed baseline (N=0) motion artifact statistics")
+    
+    # Experimental (N=2)
+    n2_stats = df[df['N'] == 2.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
+    report.append("\n## Experimental (N=2)")
+    report.append("| Statistic |  Value  |")
+    report.append("|-----------|---------|")
+    for idx, val in n2_stats.items():
+        report.append(f"| {idx:9} | {val:7} |")
+    logging.info("Computed N=2 motion artifact statistics")
+
+    # Experimental (N=3)
+    n3_stats = df[df['N'] == 3.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
+    report.append("\n## Experimental (N=3)")
+    report.append("| Statistic |  Value  |")
+    report.append("|-----------|---------|")
+    for idx, val in n3_stats.items():
+        report.append(f"| {idx:9} | {val:7} |")
+    logging.info("Computed N=3 motion artifact statistics")
+    
+    # Save report in statistical_analysis folder
+    report_path = results_dir / 'motion_artifact_report.md'
+    results_dir.mkdir(parents=True, exist_ok=True)
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write("\n".join(report))
+    logging.info(f"Saved motion artifact report to {report_path}")
 
 def main():
     """Orchestrates statistical analysis workflow for N-back task data.    
@@ -651,6 +715,9 @@ def main():
                     task_data = [d for d in all_viz_data if d['Task'].iloc[0] == task_level][0]
                     generate_combined_visualizations(task_data, vars)
 
+        # Add motion artifact report
+        generate_motion_artifact_report(Path("results/motion_artifacts.csv"), RESULTS_DIR)
+        
     except Exception as e:
         logging.critical(f"Pipeline failure: {str(e)}")
         sys.exit(1)
