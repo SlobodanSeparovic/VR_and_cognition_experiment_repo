@@ -164,7 +164,7 @@ def _create_raw(stream):
 def _basic_filtering(raw):
     """Apply primary step-basic filtering"""
     # Bandpass filter for project compatibility (preserve theta, alpha, beta)
-    raw.filter(4, 31, fir_design='firwin')
+    raw.filter(4, 30, fir_design='firwin')
     
     # Notch filter
     raw.notch_filter(50)
@@ -219,7 +219,7 @@ def _detect_bad_channels(raw, paths, min_peak, max_peak):
     return bad_by_ptp
 
 def _ica_cleaning(raw, paths):
-    """Perform automated ICA component rejection for everything but brain and other"""
+    """Perform automated ICA component rejection for everything but brain and other and with probability more than 50%"""
     # Ensure figures directory exists
     os.makedirs(paths['ica_components'], exist_ok=True)
     
@@ -247,7 +247,7 @@ def _ica_cleaning(raw, paths):
         ic_labels = label_components(raw, ica, method='iclabel')
     
         # Automatically exclude components not having brain or other in their label with probability >=50% 
-        # for balance between false positives and false negatives classification results
+        # for balance between true positives and true negatives classification results
         auto_excluded = [idx for idx, (label, probs) in enumerate(zip(ic_labels['labels'], ic_labels['y_pred_proba'])) if label.lower() not in ("brain", "other") and np.max(probs) >= 0.5]
     
     except Exception as e:
