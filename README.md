@@ -84,9 +84,11 @@ random_seqs.csv: Contains the order of baseline and experimental conditions for 
 
     Two additional CSV files are generated in /results:
 
-        final_dataset.csv: Contains encoded variables from all participants, suitable for statistical analysis (nominal data are one-hot-encoded, continuous data remain unchanged).
+        final_dataset.csv: Contains corrected variables from all participants.
+        Suitable for further statistical analysis in python.
 
-        motion_artifacts.csv: Contains the proportion of EEG data flagged as motion artifacts and excluded from power spectral density calculations. Used for reporting only.
+        motion_artifacts.csv: Contains the proportion of EEG data flagged as motion artifacts.
+        This is the proportion of data excluded from power spectral density calculations. Used for reporting only.
 
 Ensure both CSV files (final_dataset.csv and motion_artifacts.csv) have been created.
 
