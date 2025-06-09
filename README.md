@@ -98,64 +98,64 @@ This is the main statistical analysis pipeline for the experiment.
 
 It loads final_dataset.csv and motion_artifacts.csv.
 
-It creates a new folder called statistical_analysis.
+It creates a new folder called statistical_analysis and performs statistical analysis.
 
-Statistical Analysis Pipeline
-    Two Analysis Arms:
+# Statistical Analysis Pipeline
+Two Analysis Arms:
 
-        2-back task difficulty
+    2-back task difficulty
 
-        3-back task difficulty
+    3-back task difficulty
 
-    Data Validation:
+Data Validation:
 
-        Any dependent variables with missing values are excluded from further analysis.
+    Any dependent variables with missing values are excluded from further analysis.
 
-    Assumption Testing:
+Assumption Testing:
 
-        For each dependent variable, the pipeline tests the assumptions of repeated measures ANOVA (normality and sphericity).
+    For each dependent variable, the pipeline tests the assumptions of repeated measures ANOVA (normality and sphericity).
 
-        Normality: Assessed using the Shapiro-Wilk test; variables passing (p ≥ 0.05) proceed.
+    Normality: Assessed using the Shapiro-Wilk test; variables passing (p ≥ 0.05) proceed.
 
-        Sphericity: Assessed using Mauchly’s test; if violated (p < 0.05), Greenhouse-Geisser or Huynh-Feldt corrections are applied.
+    Sphericity: Assessed using Mauchly’s test; if violated (p < 0.05), Greenhouse-Geisser or Huynh-Feldt corrections are applied.
 
-    Analysis Paths:
+Analysis Paths:
 
-        Parametric:
+    Parametric:
 
-            If assumptions are met, repeated measures ANOVA is performed.
+        If assumptions are met, repeated measures ANOVA is performed.
 
-            Effect sizes (globalized eta-squared) are reported.
+        Effect sizes (globalized eta-squared) are reported.
 
-            Post-hoc comparisons (Bonferroni-corrected pairwise t-tests) are performed for significant results.
+        Post-hoc comparisons (Bonferroni-corrected pairwise t-tests) are performed for significant results.
 
-        Nonparametric:
+    Nonparametric:
 
-            Friedman’s test is performed for all dependent variables.
+        Friedman’s test is performed for all dependent variables.
 
-            Post-hoc Conover tests are performed for significant results.
+        Post-hoc Conover tests are performed for significant results.
 
-    Reporting:
+Reporting:
 
-        For each analysis arm, detailed reports are generated in the statistical_analysis folder, including:
+    For each analysis arm, detailed reports are generated in the statistical_analysis folder, including:
 
-            Parametric and nonparametric results
+        Parametric and nonparametric results
 
-            Post-hoc comparisons
+        Post-hoc comparisons
 
-            Effect sizes
+        Effect sizes
 
-            Agreement between parametric and nonparametric results
+        Agreement between parametric and nonparametric results
 
-            Visualizations (correlation matrices)
+        Visualizations (correlation matrices)
 
-    Motion Artifacts:
+Motion Artifacts:
 
-        A dedicated report (motion_artifact_report.md) summarizes basic statistics on motion artifacts, stratified by baseline (N=0) and experimental (N=2,N=3) conditions.
+    A dedicated report (motion_artifact_report.md) summarizes basic statistics on motion artifacts, stratified by baseline (N=0) and experimental (N=2,N=3) conditions.
 
-    Visualizations:
+Visualizations:
 
-        Correlation matrices and combined performance plots are generated for each task and across tasks for common variables.
+    Correlation matrices and combined performance plots are generated for each task and across tasks for common variables.
 
 # Further Notes
 Logginng: All steps are logged for transparency and reproducibility.
