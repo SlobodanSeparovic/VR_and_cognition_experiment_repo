@@ -1,4 +1,5 @@
 import warnings
+import shutil
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -24,21 +25,20 @@ LOG_FILE = RESULTS_DIR / 'analysis.log'
 # Create results directory if needed
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Configure logging system
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE, mode='w'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-
 def initialize_directories():
-    """Create required output directories"""
+    """Create required output directories and clean up existing log handlers"""
+    # Close existing file handlers
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+            root_logger.removeHandler(handler)
+    
+    # Create directories
     for task in ['2back', '3back']:
         (RESULTS_DIR / task / 'parametric').mkdir(parents=True, exist_ok=True)
         (RESULTS_DIR / task / 'nonparametric').mkdir(parents=True, exist_ok=True)
+
 
 def load_dataset():
     """Load and validate input dataset from CSV"""
@@ -665,14 +665,35 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
     logging.info(f"Saved motion artifact report to {report_path}")
 
 def main():
-    """Orchestrates statistical analysis workflow for N-back task data.    
+    """Orchestrates statistical analysis workflow for N-back task data.
     Workflow steps:
-    1. Initializes directory structure
-    2. Loads and filters experimental data
-    3. Performs parametric/non-parametric analyses
-    4. Generates reports and visualizations
+    1. Deletes the statistical_analysis folder if it exists
+    2. Initializes directory structure
+    3. Loads and filters experimental data
+    4. Performs parametric/non-parametric analyses
+    5. Generates reports and visualizations
     """
     try:
+        # Delete existing folder first
+        stats_dir = Path("results/statistical_analysis")
+        if stats_dir.exists():
+            shutil.rmtree(stats_dir)
+            logging.shutdown()
+            
+        # Create new directory structure
+        stats_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 3. Configure logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(stats_dir / 'analysis.log', mode='w'),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        logging.info("Logging system initialized after directory cleanup")
+
         initialize_directories()
         raw_data = load_dataset()
         target_vars = [
@@ -686,17 +707,11 @@ def main():
 
         for task in [2, 3]:
             task_level = f"{task}back"
-            
-            # Create separate copies for analysis and visualization
             task_data_raw = raw_data[raw_data['N'] == task].copy()
             task_data_analysis = task_data_raw.copy()
-            
             current_vars = [v for v in target_vars if v in task_data_analysis.columns]
-            
             filtered_vars = analyze_task_data(task_data_analysis, task_level, current_vars)
             filtered_vars_per_task[task_level] = filtered_vars
-            
-            # Prepare visualization data from raw data
             viz_data = task_data_raw[['Subject', 'Env'] + filtered_vars].copy()
             viz_data['Task'] = task_level
             all_viz_data.append(viz_data)
@@ -704,7 +719,6 @@ def main():
 
         if all_viz_data:
             common_dvs = set.intersection(*[set(vars) for vars in filtered_vars_per_task.values()])
-            
             if common_dvs:
                 logging.info(f"Common variables in 2-back and 3-back conditions: {', '.join(common_dvs)}")
                 combined_data = pd.concat(all_viz_data)
@@ -716,7 +730,7 @@ def main():
                     generate_combined_visualizations(task_data, vars)
 
         # Add motion artifact report
-        generate_motion_artifact_report(Path("results/motion_artifacts.csv"), RESULTS_DIR)
+        generate_motion_artifact_report(Path("results/motion_artifacts.csv"), stats_dir)
         
     except Exception as e:
         logging.critical(f"Pipeline failure: {str(e)}")
