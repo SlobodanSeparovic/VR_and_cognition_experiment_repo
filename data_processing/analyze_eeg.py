@@ -35,7 +35,7 @@ def _calculate_band_power(raw):
             "Participant data cannot be used for the experiment."
         )
     
-    # Get frequency for proper binning of the data and ratio of data flagged as bad
+    # Get frequency for proper binning of the frequencies and ratio of data flagged as bad
     sfreq = int(raw.info['sfreq'])
     
     # Calculate artifact percentage including short segments
@@ -54,7 +54,7 @@ def _calculate_band_power(raw):
     print("Frontal theta bin frequencies:", psd_frontal_theta.freqs)
     # For parietal alpha (8-13 Hz) 
     print("Parietal alpha bin frequencies:", psd_parietal_alpha.freqs)    
-    # For global theta (5-7 Hz)
+    # For global theta (4-7 Hz)
     print("Global theta bin frequencies:", psd_global_theta.freqs)
     # For global alpha (8-13 Hz) 
     print("Parietal alpha bin frequencies:", psd_global_alpha.freqs)    
