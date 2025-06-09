@@ -50,7 +50,7 @@ def load_dataset():
         logging.critical("Missing input data file - aborting analysis")
         sys.exit(1)
 
-def filter_dvs_by_missing(data, dvs, task_level):
+def _filter_dvs_by_missing(data, dvs, task_level):
     """Exclude variables with missing values"""
     valid = []
     for dv in dvs:
@@ -62,7 +62,7 @@ def filter_dvs_by_missing(data, dvs, task_level):
             valid.append(dv)
     return valid
 
-def check_rm_assumptions(data, dv):
+def _check_rm_assumptions(data, dv):
     """Check assumptions for parametric analysis"""
     norm = pg.normality(data[dv])
     sph = pg.sphericity(data, dv=dv, subject='Subject', within='Env')
@@ -125,7 +125,7 @@ Applied method: *{transforms.get(dv, 'none')}*
     report_path = save_dir / f"{dv}_report.md"
     report_path.write_text(report_content.strip(), encoding="utf-8")
     
-def generate_final_report(task_level: str, 
+def _generate_final_report(task_level: str, 
                            nonparametric_path: Path,
                            parametric_path: Path,
                            env_labels: List[str]) -> None:
@@ -311,7 +311,7 @@ def generate_final_report(task_level: str,
 
 
     
-def friedman_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
+def _friedman_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
     results = []
     for dv in dvs:
         # Get unique environments
@@ -342,7 +342,7 @@ def friedman_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.
     
     return pd.concat(results) if results else pd.DataFrame()
 
-def parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
+def _parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
     """Perform parametric post-hoc tests with Bonferroni correction"""
     results = []
     for dv in dvs:
@@ -381,7 +381,7 @@ def analyze_task_data(data: pd.DataFrame,
     parametric_dir = RESULTS_DIR / task_level / 'parametric'
     nonparametric_dir = RESULTS_DIR / task_level / 'nonparametric'
     
-    filtered_vars = filter_dvs_by_missing(data, variables, task_level)
+    filtered_vars = _filter_dvs_by_missing(data, variables, task_level)
     
     parametric_results = []
     nonparametric_results = []
@@ -402,14 +402,14 @@ def analyze_task_data(data: pd.DataFrame,
     nonparametric_only = []
 
     for dv in filtered_vars:
-        assumptions = check_rm_assumptions(data, dv)
+        assumptions = _check_rm_assumptions(data, dv)
         
         # Apply transformation if needed
         if not assumptions['valid'] and not assumptions['normality_passed']:
             pt = PowerTransformer(method='yeo-johnson')
             data[dv] = pt.fit_transform(data[[dv]])
             transformations[dv] = 'yeo-johnson'
-            assumptions = check_rm_assumptions(data, dv)
+            assumptions = _check_rm_assumptions(data, dv)
 
         # Track analysis eligibility
         if assumptions['valid']:
@@ -494,7 +494,7 @@ def analyze_task_data(data: pd.DataFrame,
     sig_dvs = [row['DV'] for _, row in pd.read_csv(nonpara_path).iterrows() 
               if row['p-unc'] < 0.05]
     if sig_dvs:
-        posthoc_df = friedman_posthoc(data, task_level, sig_dvs)
+        posthoc_df = _friedman_posthoc(data, task_level, sig_dvs)
         posthoc_path = nonparametric_dir / 'posthoc_conover.csv'
         posthoc_df.to_csv(posthoc_path, index=False)
         logging.info(f"Saved post-hoc results to {posthoc_path}")
@@ -508,13 +508,13 @@ def analyze_task_data(data: pd.DataFrame,
         # Perform parametric post-hoc
         sig_para = para_df[para_df['p-unc'] < 0.05]['DV'].tolist()
         if sig_para:
-            para_posthoc = parametric_posthoc(data, task_level, sig_para)
+            para_posthoc = _parametric_posthoc(data, task_level, sig_para)
             para_posthoc_path = parametric_dir / 'posthoc_parametric.csv'
             para_posthoc.to_csv(para_posthoc_path, index=False)
             logging.info(f"Saved parametric post-hoc results to {para_posthoc_path}")
     
     # Generate comparative report
-    generate_final_report(
+    _generate_final_report(
         task_level=task_level,
         nonparametric_path=nonpara_path,
         parametric_path=para_path,
@@ -526,11 +526,11 @@ def analyze_task_data(data: pd.DataFrame,
     data.to_csv(task_dir / f"{task_level}_data.csv", index=False)
     
     # Add correlation analysis
-    generate_correlation_matrix(data, task_dir)
+    _generate_correlation_matrix(data, task_dir)
 
     return filtered_vars
 
-def generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
+def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
     """Generate and save correlation matrix for task-specific DVs"""
     try:
         # Select only numeric DV columns
