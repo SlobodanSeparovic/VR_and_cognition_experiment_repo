@@ -18,16 +18,16 @@ VR_and_cognition_experiment/
 │   ├── random_seqs.csv
 │   ├── randomization.py
 ├── .gitignore
-├── main_analysis.py
-├── main_correction.py
-├── main_preprocessing.py
+├── main_analyse.py
+├── main_correct.py
+├── main_preprocess.py
 ├── README.md
 ├── requirements.txt
 └── settings.ini
 ```
 
 # Background
-This data processing pipeline is designed for experiments exploring how different virtual environments (control, nature, and urban) affect cognitive strain in participants. The results are intended to inform the selection of environments for post-stroke rehabilitation using virtual reality headsets.
+This data processing pipeline is designed for experiment exploring how different virtual environments (control, nature, and urban) affect cognitive strain in participants. The results are intended to inform the selection of environments for post-stroke rehabilitation using virtual reality headsets.
 
 # Local Data Handling
 Root Directory: The pipeline extracts the root repository directory for local use.
@@ -76,23 +76,33 @@ random_seqs.csv: Contains the order of baseline and experimental conditions for 
 
     Ensure all participants’ data have been processed.
 
-5. Run main_data_correction.py
+5. Run main_correcting.py
 
     This generates CSV files with corrected EEG-derived indices, calculated as (condition - baseline) / baseline.
 
     These files are stored in the same folder as the participant’s raw data CSV.
 
+    Handles data validation:
+
+    It handles dependent variables that have missing values by dropping the respective dependent variable within the experimental arm (2-back task and 3-back task testing conditions).
+
+    It handles outliers from EEG derived indexes and completely excludes participant from the respective arm of the analysis if any of the indexes are excluded due to being identified as outliers.
+
+    Creates comprehensive data_cleaning_report.md 
+
     Two additional CSV files are generated in /results:
 
-        final_dataset.csv: Contains corrected variables from all participants.
-        Suitable for further statistical analysis in python.
+        final_dataset.csv: Contains the final dataset containing corrected variables from participants that were not excluded.
+
+            Suitable for further statistical analysis in python.
 
         motion_artifacts.csv: Contains the proportion of EEG data flagged as motion artifacts.
-        This is the proportion of data excluded from power spectral density calculations. Used for reporting only.
+
+            This is the proportion of data excluded from power spectral density calculations. Used for reporting only.
 
 Ensure both CSV files (final_dataset.csv and motion_artifacts.csv) have been created.
 
-6. Run main_analysis.py
+6. Run main_analysing.py
 
 This is the main statistical analysis pipeline for the experiment.
 
@@ -103,13 +113,9 @@ It creates a new folder called statistical_analysis and performs statistical ana
 # Statistical Analysis Pipeline
 Two Analysis Arms:
 
-    2-back task difficulty
+    2-back task difficulty (lower cognitive workload)
 
-    3-back task difficulty
-
-Data Validation:
-
-    Any dependent variables with missing values are excluded from further analysis.
+    3-back task difficulty (higher cognitive workload)
 
 Assumption Testing:
 
@@ -117,17 +123,9 @@ Assumption Testing:
 
     Normality: Assessed using the Shapiro-Wilk test; variables passing (p ≥ 0.05) proceed.
 
-    Sphericity: Assessed using Mauchly’s test; if violated (p < 0.05), Greenhouse-Geisser or Huynh-Feldt corrections are applied.
+    Sphericity: Assessed using Mauchly’s test; if violated (p < 0.05), Greenhouse-Geisser corrections are applied.
 
 Analysis Paths:
-
-    Parametric:
-
-        If assumptions are met, repeated measures ANOVA is performed.
-
-        Effect sizes (globalized eta-squared) are reported.
-
-        Post-hoc comparisons (Bonferroni-corrected pairwise t-tests) are performed for significant results.
 
     Nonparametric:
 
@@ -135,23 +133,33 @@ Analysis Paths:
 
         Post-hoc Conover tests are performed for significant results.
 
+    Parametric:
+
+        If the dependen variable met the assumtions, repeated measures ANOVA is performed.
+
+        Effect sizes (globalized eta-squared) are reported.
+
+        Post-hoc comparisons (Bonferroni-corrected pairwise t-tests) are performed for significant results.
+
 Reporting:
 
     For each analysis arm, detailed reports are generated in the statistical_analysis folder, including:
 
         Parametric and nonparametric results
 
-        Post-hoc comparisons
-
-        Effect sizes
-
         Agreement between parametric and nonparametric results
+
+        Post-hoc results
+
+        Effect sizes        
 
         Visualizations (correlation matrices)
 
 Motion Artifacts:
 
-    A dedicated report (motion_artifact_report.md) summarizes basic statistics on motion artifacts, stratified by baseline (N=0) and experimental (N=2,N=3) conditions.
+    A dedicated report (motion_artifact_report.md) summarizes basic statistics on motion artifacts, stratified by baseline (N=0) and
+    
+    experimental (N=2,N=3) conditions.
 
 Visualizations:
 
@@ -160,4 +168,4 @@ Visualizations:
 # Further Notes
 Logginng: All steps are logged for transparency and reproducibility.
 
-Automation: The pipeline is designed for automated, reproducible analysis and reporting of experimental results
+Automation: The pipeline is designed for automated, reproducible analysis and reporting of experimental results.
