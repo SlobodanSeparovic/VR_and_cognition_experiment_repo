@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import logging
 import sys
 import pingouin as pg
 from scikit_posthocs import posthoc_conover
@@ -26,14 +25,7 @@ LOG_FILE = RESULTS_DIR / 'analysis.log'
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def initialize_directories():
-    """Create required output directories and clean up existing log handlers"""
-    # Close existing file handlers
-    root_logger = logging.getLogger()
-    for handler in root_logger.handlers[:]:
-        if isinstance(handler, logging.FileHandler):
-            handler.close()
-            root_logger.removeHandler(handler)
-    
+    """Create required output directories"""   
     # Create directories
     for task in ['2back', '3back']:
         (RESULTS_DIR / task / 'parametric').mkdir(parents=True, exist_ok=True)
@@ -44,23 +36,11 @@ def load_dataset():
     """Load and validate input dataset from CSV"""
     try:
         df = pd.read_csv(DATA_PATH)
-        logging.info(f"Dataset loaded from {DATA_PATH}")
+        print(f"Info: Dataset loaded from {DATA_PATH}")
         return df
     except FileNotFoundError:
-        logging.critical("Missing input data file - aborting analysis")
+        print("Critical warning: issing input data file - aborting analysis")
         sys.exit(1)
-
-def _filter_dvs_by_missing(data, dvs, task_level):
-    """Exclude variables with missing values"""
-    valid = []
-    for dv in dvs:
-        if data[dv].isna().any():
-            missing_count = data[dv].isna().sum()
-            total = len(data[dv])
-            logging.warning(f"Excluding {dv} from {task_level} - {missing_count}/{total} ({missing_count/total:.1%}) missing values")
-        else:
-            valid.append(dv)
-    return valid
 
 def _check_rm_assumptions(data, dv):
     """Check assumptions for parametric analysis"""
@@ -93,9 +73,7 @@ Applied method: *{transforms.get(dv, 'none')}*
 *Interpretation:* Tests if data follows normal distribution (null hypothesis assumes normal distribution). p > 0.05 does not reject null hypothesis."""
 
     if analysis_type == 'parametric':
-        gg_applied = assumptions['epsilon_gg'] < 0.75
-        hf_applied = 0.75 <= assumptions['epsilon_gg'] < 1
-        correction = 'GG' if gg_applied else 'HF' if hf_applied else 'None'
+        correction = 'GG' if assumptions['epsilon_gg'] < 1 else 'None'
         
         report_content += f"""
 2. *Sphericity Handling*
@@ -118,8 +96,8 @@ Applied method: *{transforms.get(dv, 'none')}*
     eligibility_status = "Eligible for parametric analysis." if assumptions['valid'] else "Ineligible for parametric analysis."
     
     report_content += f"""\n
-*Analysis Type:* {analysis_type.title()}
 *Eligibility Status:* {eligibility_status}
+*Analysis Type:* {analysis_type.title()}{' and nonparametric' if analysis_type == 'parametric' else ''}
 *Note:* Parametric eligibility requires passed normality (p ≥ 0.05) and sphericity (p ≥ 0.05 or corrected)."""
 
     report_path = save_dir / f"{dv}_report.md"
@@ -284,10 +262,10 @@ def _generate_final_report(task_level: str,
                     for _, row in dv_df.iterrows():
                         md_content += f"\n| {row['Env1']:7}-{row['Env2']:6} | {row['p-corr']:>9.4f} | {row['cohen-d']:>9.4f} | {row['Significance']:>12} |"
             else:
-                logging.warning(f"Skipping empty/malformed parametric post-hoc: {para_posthoc_path}")
+                print(f"Warning: Skipping empty/malformed parametric post-hoc: {para_posthoc_path}")
                 
         except Exception as e:
-            logging.error(f"Failed to process parametric post-hoc: {str(e)}")
+            print(f"Error: Failed to process parametric post-hoc: {str(e)}")
 
     md_content += """\n
 *Statistical Interpretation Note:*
@@ -307,7 +285,7 @@ def _generate_final_report(task_level: str,
     # Final Output
     report_path = nonparametric_path.parent.parent / 'analyses_results.md'
     report_path.write_text(md_content, encoding='utf-8')
-    logging.info(f"Generated final report at {report_path}")
+    print(f"Info: Generated final report at {report_path}")
 
 
     
@@ -371,17 +349,13 @@ def _parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> 
             ph['Task'] = task_level
             results.append(ph)
         except Exception as e:
-            logging.error(f"Parametric post-hoc failed for {dv}: {str(e)}")
+            print(f"Error: Parametric post-hoc failed for {dv}: {str(e)}")
     return pd.concat(results) if results else pd.DataFrame()
 
-def analyze_task_data(data: pd.DataFrame, 
-                     task_level: str, 
-                     variables: List[str]) -> List[str]:
+def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str]) -> List[str]:
     """Core analysis workflow with automated reporting"""
     parametric_dir = RESULTS_DIR / task_level / 'parametric'
     nonparametric_dir = RESULTS_DIR / task_level / 'nonparametric'
-    
-    filtered_vars = _filter_dvs_by_missing(data, variables, task_level)
     
     parametric_results = []
     nonparametric_results = []
@@ -401,7 +375,7 @@ def analyze_task_data(data: pd.DataFrame,
     parametric_candidates = []
     nonparametric_only = []
 
-    for dv in filtered_vars:
+    for dv in variables:
         assumptions = _check_rm_assumptions(data, dv)
         
         # Apply transformation if needed
@@ -445,7 +419,7 @@ def analyze_task_data(data: pd.DataFrame,
                     aov=aov
                 )
             except Exception as e:
-                logging.error(f"Parametric analysis failed for {dv}: {str(e)}")
+                print(f"Error: Parametric analysis failed for {dv}: {str(e)}")
 
         # Non-parametric analysis path runs always
         try:
@@ -474,7 +448,7 @@ def analyze_task_data(data: pd.DataFrame,
                     analysis_type='nonparametric'
                 )
         except Exception as e:
-            logging.error(f"Non-parametric analysis failed for {dv}: {str(e)}")
+            print(f"Error: Non-parametric analysis failed for {dv}: {str(e)}")
 
     # Save results with proper column order
     if parametric_results:
@@ -483,12 +457,12 @@ def analyze_task_data(data: pd.DataFrame,
     if nonparametric_results:
         pd.concat(nonparametric_results).to_csv(nonparametric_dir/'analysis_nonparametric.csv', index=False)
     
-    # Add logging statements
+    # Add print statements
     if parametric_candidates:
-        logging.info(f"{task_level} variables eligible for both analyses: {', '.join(parametric_candidates)}")
+        print(f"Info: {task_level} variables eligible for both analyses: {', '.join(parametric_candidates)}")
     
     if nonparametric_only:
-        logging.info(f"{task_level} variables requiring non-parametric analysis: {', '.join(nonparametric_only)}")
+        print(f"Info: {task_level} variables requiring non-parametric analysis: {', '.join(nonparametric_only)}")
 
     # Always perform nonparametric post-hoc analysis
     sig_dvs = [row['DV'] for _, row in pd.read_csv(nonpara_path).iterrows() 
@@ -497,7 +471,7 @@ def analyze_task_data(data: pd.DataFrame,
         posthoc_df = _friedman_posthoc(data, task_level, sig_dvs)
         posthoc_path = nonparametric_dir / 'posthoc_conover.csv'
         posthoc_df.to_csv(posthoc_path, index=False)
-        logging.info(f"Saved post-hoc results to {posthoc_path}")
+        print(f"Info: Saved post-hoc results to {posthoc_path}")
     
     # Save parametric results
     if parametric_results:
@@ -511,15 +485,10 @@ def analyze_task_data(data: pd.DataFrame,
             para_posthoc = _parametric_posthoc(data, task_level, sig_para)
             para_posthoc_path = parametric_dir / 'posthoc_parametric.csv'
             para_posthoc.to_csv(para_posthoc_path, index=False)
-            logging.info(f"Saved parametric post-hoc results to {para_posthoc_path}")
+            print(f"Info: Saved parametric post-hoc results to {para_posthoc_path}")
     
     # Generate comparative report
-    _generate_final_report(
-        task_level=task_level,
-        nonparametric_path=nonpara_path,
-        parametric_path=para_path,
-        env_labels=env_labels
-    )
+    _generate_final_report(task_level=task_level, nonparametric_path=nonpara_path, parametric_path=para_path, env_labels=env_labels)
     
     # Save task-specific data for reporting
     task_dir = RESULTS_DIR / task_level
@@ -528,7 +497,7 @@ def analyze_task_data(data: pd.DataFrame,
     # Add correlation analysis
     _generate_correlation_matrix(data, task_dir)
 
-    return filtered_vars
+    return variables
 
 def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
     """Generate and save correlation matrix for task-specific DVs"""
@@ -538,7 +507,7 @@ def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
         dvs = [col for col in numeric_cols if col not in ['Subject', 'Env', 'N']]
         
         if not dvs:
-            logging.warning(f"No valid DVs for correlation matrix in {task_dir.name}")
+            print(f"Warning: No valid DVs for correlation matrix in {task_dir.name}")
             return
 
         # Calculate correlations
@@ -547,7 +516,7 @@ def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
         # Save correlation matrix
         matrix_path = task_dir / 'correlation_matrix.csv'
         corr_matrix.to_csv(matrix_path)
-        logging.info(f"Saved correlation matrix to {matrix_path}")
+        print(f"Info: Saved correlation matrix to {matrix_path}")
 
         # Create visualization
         plt.figure(figsize=(12, 10))
@@ -569,10 +538,10 @@ def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
         plot_path = task_dir / 'correlation_matrix.png'
         plt.savefig(plot_path, bbox_inches='tight', dpi=300)
         plt.close()
-        logging.info(f"Saved correlation plot to {plot_path}")
+        print(f"Info: Saved correlation plot to {plot_path}")
 
     except Exception as e:
-        logging.error(f"Correlation matrix generation failed: {str(e)}")
+        print(f"Error: Correlation matrix generation failed: {str(e)}")
 
 def generate_combined_visualizations(combined_data, dvs):
     """Create unified visualizations"""
@@ -616,7 +585,7 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
     stratified by baseline (N=0) and experiment (N=2,3)."""
     # Load data
     df = pd.read_csv(data_path)
-    logging.info(f"Loaded motion artifact data from {data_path}")
+    print(f"Info: Loaded motion artifact data from {data_path}")
     
     # Define report sections
     report = []
@@ -628,7 +597,7 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
     report.append("|-----------|---------|")
     for idx, val in overall_stats.items():
         report.append(f"| {idx:9} | {val:7} |")
-    logging.info("Computed overall motion artifact statistics")
+    print("Info: computed overall motion artifact statistics")
     
     # Baseline (N=0)
     baseline = df[df['N'] == 0.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
@@ -637,7 +606,7 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
     report.append("|-----------|---------|")
     for idx, val in baseline.items():
         report.append(f"| {idx:9} | {val:7} |")
-    logging.info("Computed baseline (N=0) motion artifact statistics")
+    print("Info: computed baseline (N=0) motion artifact statistics")
     
     # Experimental (N=2)
     n2_stats = df[df['N'] == 2.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
@@ -646,7 +615,7 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
     report.append("|-----------|---------|")
     for idx, val in n2_stats.items():
         report.append(f"| {idx:9} | {val:7} |")
-    logging.info("Computed N=2 motion artifact statistics")
+    print("Info: computed N=2 motion artifact statistics")
 
     # Experimental (N=3)
     n3_stats = df[df['N'] == 3.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
@@ -655,14 +624,14 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
     report.append("|-----------|---------|")
     for idx, val in n3_stats.items():
         report.append(f"| {idx:9} | {val:7} |")
-    logging.info("Computed N=3 motion artifact statistics")
+    print("Info: computed N=3 motion artifact statistics")
     
     # Save report in statistical_analysis folder
     report_path = results_dir / 'motion_artifact_report.md'
     results_dir.mkdir(parents=True, exist_ok=True)
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write("\n".join(report))
-    logging.info(f"Saved motion artifact report to {report_path}")
+    print(f"Info: Saved motion artifact report to {report_path}")
 
 def main():
     """Orchestrates statistical analysis workflow for N-back task data.
@@ -678,21 +647,9 @@ def main():
         stats_dir = Path("results/statistical_analysis")
         if stats_dir.exists():
             shutil.rmtree(stats_dir)
-            logging.shutdown()
             
         # Create new directory structure
         stats_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 3. Configure logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(stats_dir / 'analysis.log', mode='w'),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
-        logging.info("Logging system initialized after directory cleanup")
 
         initialize_directories()
         raw_data = load_dataset()
@@ -703,29 +660,29 @@ def main():
         ]
         
         all_viz_data = []
-        filtered_vars_per_task = {}
+        available_vars_per_task = {}
 
         for task in [2, 3]:
             task_level = f"{task}back"
             task_data_raw = raw_data[raw_data['N'] == task].copy()
             task_data_analysis = task_data_raw.copy()
             current_vars = [v for v in target_vars if v in task_data_analysis.columns]
-            filtered_vars = analyze_task_data(task_data_analysis, task_level, current_vars)
-            filtered_vars_per_task[task_level] = filtered_vars
-            viz_data = task_data_raw[['Subject', 'Env'] + filtered_vars].copy()
+            available_vars = analyze_task_data(task_data_analysis, task_level, current_vars)
+            available_vars_per_task[task_level] = available_vars
+            viz_data = task_data_raw[['Subject', 'Env'] + available_vars].copy()
             viz_data['Task'] = task_level
             all_viz_data.append(viz_data)
-            logging.info(f"{task_level} variables: {', '.join(filtered_vars)}")
+            print(f"Info: {task_level} variables: {', '.join(available_vars)}")
 
         if all_viz_data:
-            common_dvs = set.intersection(*[set(vars) for vars in filtered_vars_per_task.values()])
+            common_dvs = set.intersection(*[set(vars) for vars in available_vars_per_task.values()])
             if common_dvs:
-                logging.info(f"Common variables in 2-back and 3-back conditions: {', '.join(common_dvs)}")
+                print(f"Info: Common variables in 2-back and 3-back conditions: {', '.join(common_dvs)}")
                 combined_data = pd.concat(all_viz_data)
                 generate_combined_visualizations(combined_data, list(common_dvs))
             else:
-                logging.warning("No common variables across tasks - generating task-specific plots")
-                for task_level, vars in filtered_vars_per_task.items():
+                print("Warning: No common variables across tasks - generating task-specific plots")
+                for task_level, vars in available_vars_per_task.items():
                     task_data = [d for d in all_viz_data if d['Task'].iloc[0] == task_level][0]
                     generate_combined_visualizations(task_data, vars)
 
@@ -733,7 +690,7 @@ def main():
         generate_motion_artifact_report(Path("results/motion_artifacts.csv"), stats_dir)
         
     except Exception as e:
-        logging.critical(f"Pipeline failure: {str(e)}")
+        print(f"Critical warning: Pipeline failure: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
