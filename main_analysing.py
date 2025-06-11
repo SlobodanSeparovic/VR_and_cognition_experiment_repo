@@ -42,18 +42,6 @@ def load_dataset():
         print("Critical warning: issing input data file - aborting analysis")
         sys.exit(1)
 
-def _filter_dvs_by_missing(data, dvs, task_level):
-    """Exclude variables with missing values"""
-    valid = []
-    for dv in dvs:
-        if data[dv].isna().any():
-            missing_count = data[dv].isna().sum()
-            total = len(data[dv])
-            print(f"Warning: Excluding {dv} from {task_level} - {missing_count}/{total} ({missing_count/total:.1%}) missing values")
-        else:
-            valid.append(dv)
-    return valid
-
 def _check_rm_assumptions(data, dv):
     """Check assumptions for parametric analysis"""
     norm = pg.normality(data[dv])
@@ -366,14 +354,10 @@ def _parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> 
             print(f"Error: Parametric post-hoc failed for {dv}: {str(e)}")
     return pd.concat(results) if results else pd.DataFrame()
 
-def analyze_task_data(data: pd.DataFrame, 
-                     task_level: str, 
-                     variables: List[str]) -> List[str]:
+def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str]) -> List[str]:
     """Core analysis workflow with automated reporting"""
     parametric_dir = RESULTS_DIR / task_level / 'parametric'
     nonparametric_dir = RESULTS_DIR / task_level / 'nonparametric'
-    
-    filtered_vars = _filter_dvs_by_missing(data, variables, task_level)
     
     parametric_results = []
     nonparametric_results = []
@@ -393,7 +377,7 @@ def analyze_task_data(data: pd.DataFrame,
     parametric_candidates = []
     nonparametric_only = []
 
-    for dv in filtered_vars:
+    for dv in variables:
         assumptions = _check_rm_assumptions(data, dv)
         
         # Apply transformation if needed
@@ -506,12 +490,7 @@ def analyze_task_data(data: pd.DataFrame,
             print(f"Info: Saved parametric post-hoc results to {para_posthoc_path}")
     
     # Generate comparative report
-    _generate_final_report(
-        task_level=task_level,
-        nonparametric_path=nonpara_path,
-        parametric_path=para_path,
-        env_labels=env_labels
-    )
+    _generate_final_report(task_level=task_level, nonparametric_path=nonpara_path, parametric_path=para_path, env_labels=env_labels)
     
     # Save task-specific data for reporting
     task_dir = RESULTS_DIR / task_level
@@ -520,7 +499,7 @@ def analyze_task_data(data: pd.DataFrame,
     # Add correlation analysis
     _generate_correlation_matrix(data, task_dir)
 
-    return filtered_vars
+    return variables
 
 def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
     """Generate and save correlation matrix for task-specific DVs"""
@@ -683,29 +662,29 @@ def main():
         ]
         
         all_viz_data = []
-        filtered_vars_per_task = {}
+        available_vars_per_task = {}
 
         for task in [2, 3]:
             task_level = f"{task}back"
             task_data_raw = raw_data[raw_data['N'] == task].copy()
             task_data_analysis = task_data_raw.copy()
             current_vars = [v for v in target_vars if v in task_data_analysis.columns]
-            filtered_vars = analyze_task_data(task_data_analysis, task_level, current_vars)
-            filtered_vars_per_task[task_level] = filtered_vars
-            viz_data = task_data_raw[['Subject', 'Env'] + filtered_vars].copy()
+            available_vars = analyze_task_data(task_data_analysis, task_level, current_vars)
+            available_vars_per_task[task_level] = available_vars
+            viz_data = task_data_raw[['Subject', 'Env'] + available_vars].copy()
             viz_data['Task'] = task_level
             all_viz_data.append(viz_data)
-            print(f"Info: {task_level} variables: {', '.join(filtered_vars)}")
+            print(f"Info: {task_level} variables: {', '.join(available_vars)}")
 
         if all_viz_data:
-            common_dvs = set.intersection(*[set(vars) for vars in filtered_vars_per_task.values()])
+            common_dvs = set.intersection(*[set(vars) for vars in available_vars_per_task.values()])
             if common_dvs:
                 print(f"Info: Common variables in 2-back and 3-back conditions: {', '.join(common_dvs)}")
                 combined_data = pd.concat(all_viz_data)
                 generate_combined_visualizations(combined_data, list(common_dvs))
             else:
                 print("Warning: No common variables across tasks - generating task-specific plots")
-                for task_level, vars in filtered_vars_per_task.items():
+                for task_level, vars in available_vars_per_task.items():
                     task_data = [d for d in all_viz_data if d['Task'].iloc[0] == task_level][0]
                     generate_combined_visualizations(task_data, vars)
 
