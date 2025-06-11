@@ -73,9 +73,7 @@ Applied method: *{transforms.get(dv, 'none')}*
 *Interpretation:* Tests if data follows normal distribution (null hypothesis assumes normal distribution). p > 0.05 does not reject null hypothesis."""
 
     if analysis_type == 'parametric':
-        gg_applied = assumptions['epsilon_gg'] < 0.75
-        hf_applied = 0.75 <= assumptions['epsilon_gg'] < 1
-        correction = 'GG' if gg_applied else 'HF' if hf_applied else 'None'
+        correction = 'GG' if assumptions['epsilon_gg'] < 1 else 'None'
         
         report_content += f"""
 2. *Sphericity Handling*
@@ -98,8 +96,8 @@ Applied method: *{transforms.get(dv, 'none')}*
     eligibility_status = "Eligible for parametric analysis." if assumptions['valid'] else "Ineligible for parametric analysis."
     
     report_content += f"""\n
-*Analysis Type:* {analysis_type.title()}
 *Eligibility Status:* {eligibility_status}
+*Analysis Type:* {analysis_type.title()}{' and nonparametric' if analysis_type == 'parametric' else ''}
 *Note:* Parametric eligibility requires passed normality (p ≥ 0.05) and sphericity (p ≥ 0.05 or corrected)."""
 
     report_path = save_dir / f"{dv}_report.md"

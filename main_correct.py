@@ -135,8 +135,8 @@ def process_all_participants(results_dir='results'):
         )
         
         # Save outputs
-        _update_final_dataset(final_path, final_df)
-        _update_final_dataset(
+        _overwrite_final_dataset(final_path, final_df)
+        _overwrite_final_dataset(
             Path(results_dir)/'motion_artifacts.csv',
             pd.concat(motion_artifacts_data, ignore_index=True)
         )
@@ -251,23 +251,10 @@ def _calculate_corrected_value(row, baseline_df, column):
     except (IndexError, KeyError):
         return np.nan
 
-def _update_final_dataset(final_path, new_data):
-    """Update dataset with conflict resolution using composite keys"""
-    identity_cols = ['Subject', 'Env', 'N']
-    
-    if final_path.exists():
-        existing_df = pd.read_csv(final_path)
-        existing_df['_key'] = existing_df[identity_cols].astype(str).apply('|'.join, axis=1)
-        new_data['_key'] = new_data[identity_cols].astype(str).apply('|'.join, axis=1)
-        
-        existing_df = existing_df[~existing_df['_key'].isin(new_data['_key'])]
-        updated_df = pd.concat([existing_df.drop('_key', axis=1), 
-                              new_data.drop('_key', axis=1)])
-    else:
-        updated_df = new_data
-    
-    updated_df.to_csv(final_path, index=False)
-    return updated_df
+def _overwrite_final_dataset(final_path, new_data):
+    """Overwrite the final dataset with new data"""
+    new_data.to_csv(final_path, index=False)
+
 
 if __name__ == "__main__":
     process_all_participants()
