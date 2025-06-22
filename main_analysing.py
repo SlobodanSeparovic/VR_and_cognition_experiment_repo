@@ -99,7 +99,7 @@ Applied method: *{transforms.get(dv, 'none')}*
     report_content += f"""
 *Overall normality:* {'All environments passed' if initial_assumptions['all_envs_normal'] else 'At least one environment failed normality'}"""
 
-    # post-transformation section if applied
+    # Post-transformation section added if applied
     if transformed:
         report_content += """
         
@@ -115,7 +115,7 @@ Applied method: *{transforms.get(dv, 'none')}*
         report_content += f"""
 *Overall normality:* {'All environments passed' if final_assumptions['all_envs_normal'] else 'At least one environment failed normality'}"""
     
-    # explanatory note for zero-range cases
+    # Explanatory note for zero-range cases
     report_content += """
 \n**Note:** Environments marked as 'Zero range' have all values identical. 
 Normality tests (Shapiro-Wilk) are unreliable in these cases."""
