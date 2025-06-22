@@ -213,10 +213,10 @@ def _generate_final_report(task_level: str,
             )
             
             md_content += """
-| Comparison of means |  Environments  |  p-value  | Significance |
-|---------------------|----------------|-----------|--------------|"""
+|  Environments  | Comparison of means |  p-value  | Significance |
+|----------------|---------------------|-----------|--------------|"""
             for _, row in dv_df.iterrows():
-                md_content += f"\n| {row['Means']:<19} | {row['Env1']:7}-{row['Env2']:6} | {row['p_value']:>9.4f} | {row['Significance']:>12} |"
+                md_content += f"\n| {row['Env1']:7}-{row['Env2']:6} | {row['Means']:<19} | {row['p_value']:>9.4f} | {row['Significance']:>12} |"
 
     para_posthoc_path = parametric_path.parent / 'posthoc_parametric.csv'
     if para_posthoc_path.exists():
