@@ -42,42 +42,92 @@ def load_dataset():
         sys.exit(1)
 
 def _check_rm_assumptions(data, dv):
-    """Check assumptions for parametric analysis"""
-    norm = pg.normality(data[dv])
+    """Check assumptions for parametric analysis with environment-specific normality"""
+    env_normality = {}
+    all_passed = True
+    
+    for env in data['Env'].unique():
+        env_data = data[data['Env'] == env][dv]
+        # Detect zero-range data (all values identical)
+        zero_range = (env_data.nunique() == 1)
+        norm = pg.normality(env_data)
+        env_passed = norm['pval'].values[0] >= 0.05
+        env_normality[env] = {
+            'pval': norm['pval'].values[0],
+            'passed': env_passed,
+            'zero_range': zero_range  # New flag
+        }
+        if not env_passed:
+            all_passed = False
+    
     sph = pg.sphericity(data, dv=dv, subject='Subject', within='Env')
     
     return {
-        'normality_passed': norm['pval'].values[0] >= 0.05,
-        'normality_pval': norm['pval'].values[0],
+        'env_normality': env_normality,
+        'all_envs_normal': all_passed,
         'sphericity_pval': sph[-1],
         'epsilon_gg': pg.epsilon(data, dv=dv, correction='gg'),
-        'valid': (norm['pval'].values[0] >= 0.05) and (sph[-1] >= 0.05)
+        'valid': all_passed and (sph[-1] >= 0.05)
     }
 
-def generate_report(assumptions, transforms, dv, task_level, save_dir, analysis_type='parametric', aov=None, dv_descriptive=None):
-    """Create type-specific analysis reports with descriptive statistics"""
+def generate_report(initial_assumptions, final_assumptions, transforms, dv, task_level, save_dir, analysis_type='parametric', aov=None, dv_descriptive=None):
+    """Create type-specific analysis reports with pre/post transformation comparison"""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     
+    # Determine transformation status for reporting
+    transformed = dv in transforms
+    transformation_status = "*Pre/Post Transformation Comparison*" if transformed else "*No Transformation Applied*"
+    
     report_content = f"""
 ## Analysis Report: {dv} ({task_level})
+{transformation_status}
+
 ### Data Transformations
 Applied method: *{transforms.get(dv, 'none')}*
 *Interpretation:* Transformations adjust data distribution to meet parametric assumptions. Yeo-Johnson preserves sign while handling zero/negative values.
 
-### Assumption Checks
-1. *DV Normality (Shapiro-Wilk)*
-   - p-value: {assumptions['normality_pval']:.4f}
-   - Passed: {'Yes' if assumptions['normality_passed'] else 'No'}
-*Interpretation:* Tests if data follows normal distribution (null hypothesis assumes normal distribution). p > 0.05 does not reject null hypothesis."""
+### Pre-Transformation Assumptions
+1. *DV Normality (Shapiro-Wilk) by Environment*
+   | Environment | p-value  | Passed (p≥0.05)  | Note          |
+   |-------------|----------|------------------|---------------|"""
+    
+    for env, results in initial_assumptions['env_normality'].items():
+        note = "Zero range" if results['zero_range'] else ""
+        report_content += f"\n   | {env:<11} | {results['pval']:>8.4f} | {'Yes' if results['passed'] else 'No':>16} | {note:<13} |"
+    
+    report_content += f"""
+*Overall normality:* {'All environments passed' if initial_assumptions['all_envs_normal'] else 'At least one environment failed normality'}"""
 
-    if analysis_type == 'parametric':
-        correction = 'GG' if assumptions['epsilon_gg'] < 1 else 'None'
+    # post-transformation section if applied
+    if transformed:
+        report_content += """
+        
+### Post-Transformation Assumptions
+1. *DV Normality (Shapiro-Wilk) by Environment*
+   | Environment | p-value  | Passed (p≥0.05)  | Note          |
+   |-------------|----------|------------------|---------------|"""
+        
+        for env, results in final_assumptions['env_normality'].items():
+            note = "Zero range" if results['zero_range'] else ""
+            report_content += f"\n   | {env:<11} | {results['pval']:>8.4f} | {'Yes' if results['passed'] else 'No':>16} | {note:<13} |"
         
         report_content += f"""
+*Overall normality:* {'All environments passed' if final_assumptions['all_envs_normal'] else 'At least one environment failed normality'}"""
+    
+    # explanatory note for zero-range cases
+    report_content += """
+\n**Note:** Environments marked as 'Zero range' have all values identical. 
+Normality tests (Shapiro-Wilk) are unreliable in these cases."""
+
+    if analysis_type == 'parametric':
+        correction = 'GG' if final_assumptions['epsilon_gg'] < 1 else 'None'
+        
+        report_content += f"""
+        
 2. *Sphericity Handling*
-   - Mauchly's p-value: {assumptions['sphericity_pval']:.4f}
-   - Greenhouse-Geisser epsilon: {assumptions['epsilon_gg']:.3f}
+   - Mauchly's p-value: {final_assumptions['sphericity_pval']:.4f}
+   - Greenhouse-Geisser epsilon: {final_assumptions['epsilon_gg']:.3f}
    - Correction Applied: {correction}
 *Interpretation:* Sphericity requires equal variance differences between conditions. epsilon < 1 indicates violation, requiring correction."""
         
@@ -100,11 +150,11 @@ Applied method: *{transforms.get(dv, 'none')}*
             ci_str = f"[{stats['ci_low']:.2f}, {stats['ci_high']:.2f}]"
             report_content += f"\n| {env:<11} | {stats['mean']:<8.2f} | {ci_str:<16} |"
             
-    eligibility_status = "Eligible for parametric analysis." if assumptions['valid'] else "Ineligible for parametric analysis."        
+    eligibility_status = "Eligible for parametric analysis." if final_assumptions['valid'] else "Ineligible for parametric analysis."        
     report_content += f"""\n
 *Eligibility Status:* {eligibility_status}
 *Analysis Type:* {analysis_type.title()}{' and nonparametric' if analysis_type == 'parametric' else ''}
-*Note:* Parametric eligibility requires passed normality (p ≥ 0.05) and sphericity (p ≥ 0.05 or corrected)."""
+*Note:* Parametric eligibility requires passed normality (p ≥ 0.05) in all environments and sphericity (p ≥ 0.05 or corrected)."""
 
     report_path = save_dir / f"{dv}_report.md"
     report_path.write_text(report_content.strip(), encoding="utf-8")
@@ -328,6 +378,7 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
     transformations = {}
     transformers = {}  # Store transformer objects for back-transformation
     descriptive_stats = {}  # Store descriptive statistics for reporting
+    assumption_history = {}  # Track assumption states before/after transformations
     
     # Get actual environment labels from data
     env_labels = sorted(data['Env'].unique())
@@ -347,18 +398,24 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
         # Store original data for back-transformation
         original_dv = data[dv].copy()
         
-        assumptions = _check_rm_assumptions(data, dv)
+        # Capture pre-transformation assumption state
+        pre_assumptions = _check_rm_assumptions(data, dv)
+        assumption_history[dv] = {'pre': pre_assumptions}
         
-        # Apply transformation if needed
-        if not assumptions['valid'] and not assumptions['normality_passed']:
+        # Apply transformation if needed based on pre-assumptions
+        if not pre_assumptions['valid'] and not pre_assumptions['all_envs_normal']:
             pt = PowerTransformer(method='yeo-johnson')
             data[[dv]] = pt.fit_transform(data[[dv]])
             transformations[dv] = 'yeo-johnson'
-            transformers[dv] = pt  # Store transformer for back-transformation
-            assumptions = _check_rm_assumptions(data, dv)
+            transformers[dv] = pt
+            # Capture post-transformation assumption state
+            post_assumptions = _check_rm_assumptions(data, dv)
+            assumption_history[dv]['post'] = post_assumptions
+        else:
+            post_assumptions = pre_assumptions
 
-        # Track analysis eligibility
-        if assumptions['valid']:
+        # Track analysis eligibility using final assumption state
+        if post_assumptions['valid']:
             parametric_candidates.append(dv)
         else:
             nonparametric_only.append(dv)
@@ -367,7 +424,7 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
         dv_descriptive = {}
         for env in env_labels:
             if dv in transformers:
-                # For transformed data: compute stats on transformed scale then back-transform
+                # Back-transform stats for reporting
                 trans_df = data.loc[data['Env'] == env, [dv]]
                 mean_trans = np.mean(trans_df[dv])
                 sem_trans = scipy.stats.sem(trans_df[dv])
@@ -377,11 +434,9 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
                 else:
                     ci_low_trans, ci_high_trans = mean_trans, mean_trans
                 
-                # Back-transform using DataFrame to avoid warnings
                 transformer = transformers[dv]
                 with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", category=UserWarning, 
-                                           message="X does not have valid feature names")
+                    warnings.filterwarnings("ignore", category=UserWarning)
                     mean_orig = transformer.inverse_transform(pd.DataFrame({dv: [mean_trans]}))[0][0]
                     ci_low_orig = transformer.inverse_transform(pd.DataFrame({dv: [ci_low_trans]}))[0][0]
                     ci_high_orig = transformer.inverse_transform(pd.DataFrame({dv: [ci_high_trans]}))[0][0]
@@ -404,7 +459,7 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
         descriptive_stats[dv] = dv_descriptive
 
         # Parametric analysis path
-        if assumptions['valid']:
+        if post_assumptions['valid']:
             try:
                 aov = pg.rm_anova(
                     data=data,
@@ -421,7 +476,8 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
                 
                 parametric_results.append(aov)
                 generate_report(
-                    assumptions=assumptions,
+                    initial_assumptions=assumption_history[dv]['pre'],
+                    final_assumptions=post_assumptions,
                     transforms=transformations,
                     dv=dv,
                     task_level=task_level,
@@ -449,9 +505,10 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
             
             nonparametric_results.append(friedman)
             
-            if not assumptions['valid']:
+            if not post_assumptions['valid']:
                 generate_report(
-                    assumptions=assumptions,
+                    initial_assumptions=assumption_history[dv]['pre'],
+                    final_assumptions=post_assumptions,
                     transforms=transformations,
                     dv=dv,
                     task_level=task_level,
@@ -461,7 +518,7 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
                 )
         except Exception as e:
             print(f"Error: Non-parametric analysis failed for {dv}: {str(e)}")
-
+    
     # Save results with proper column order
     if parametric_results:
         pd.concat(parametric_results).to_csv(parametric_dir/'analysis_parametric.csv', index=False)
@@ -525,7 +582,7 @@ def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
         if not dvs:
             print(f"Warning: No valid DVs for correlation matrix in {task_dir.name}")
             return
-
+        
         corr_matrix = task_data[dvs].corr(method='pearson')
         matrix_path = task_dir / 'correlation_matrix.csv'
         corr_matrix.to_csv(matrix_path)
