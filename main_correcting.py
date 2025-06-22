@@ -4,8 +4,8 @@ import numpy as np
 from pathlib import Path
 
 def process_all_participants(results_dir='results'):
-    """Main processing function with robust participant-level outlier handling"""
-    # Delete old csv files if they exist
+    """Main processing function with environment-specific outlier handling"""
+    # Clean up previous outputs
     _delete_old_csvs(results_dir)    
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     
@@ -33,7 +33,7 @@ def process_all_participants(results_dir='results'):
                     for n_arm in [2, 3]:
                         if n_arm in corrected_df['N'].astype(int).values:
                             tracking['eligible'][n_arm].add(int(clean_id))
-                    
+    
     # Second pass: Process data
     for participant_dir in Path(results_dir).iterdir():
         if participant_dir.is_dir():
@@ -63,32 +63,45 @@ def process_all_participants(results_dir='results'):
         outlier_participants = set()
         nan_columns = {2: set(), 3: set()}
 
-        # Outlier detection and participant collection
+        # Environment-specific outlier detection
         for n_arm in [2, 3]:
-            # Modified arm_mask with type safety
             arm_mask = final_df['N'].astype(int) == n_arm
             arm_data = final_df[arm_mask].copy()
-
-            for metric in ['FTCLI_corrected', 'FTPACLI_corrected', 'EngI_corrected']:
-                if metric in arm_data.columns:
-                    mean_val = arm_data[metric].mean()
-                    sd_val = arm_data[metric].std()
-                    lower = mean_val - 2 * sd_val
-                    upper = mean_val + 2 * sd_val
-                    
-                    outliers = arm_data[(arm_data[metric] < lower) | (arm_data[metric] > upper)]
-                    outlier_participants.update(zip(outliers['Subject'], outliers['N']))
-                    
-                    # Track participants and report
-                    for _, row in outliers.iterrows():
-                        tracking['excluded'][n_arm].add(row['Subject'])
-                        removal_report.append({
-                            'Participant': row['Subject'],
-                            'Arm': n_arm,
-                            'Metric': metric,
-                            'Value': f"{row[metric]:.2f}",
-                            'Reason': 'Outlier'
-                        })
+            
+            # Group by environment within arm
+            for env in arm_data['Env'].unique():
+                env_mask = (arm_data['Env'] == env)
+                env_data = arm_data[env_mask].copy()
+                
+                for metric in ['FTCLI_corrected', 'FTPACLI_corrected', 'EngI_corrected']:
+                    if metric in env_data.columns and len(env_data) >= 4:  # Need min 4 points for IQR
+                        # Calculate IQR bounds
+                        Q1 = env_data[metric].quantile(0.25)
+                        Q3 = env_data[metric].quantile(0.75)
+                        IQR = Q3 - Q1
+                        lower_bound = Q1 - 1.5 * IQR
+                        upper_bound = Q3 + 1.5 * IQR
+                        
+                        # Identify outliers
+                        outliers = env_data[
+                            (env_data[metric] < lower_bound) | 
+                            (env_data[metric] > upper_bound)
+                        ]
+                        
+                        # Mark participants for exclusion
+                        for _, row in outliers.iterrows():
+                            participant_id = row['Subject']
+                            outlier_participants.add((participant_id, n_arm))
+                            tracking['excluded'][n_arm].add(participant_id)
+                            
+                            removal_report.append({
+                                'Participant': participant_id,
+                                'Arm': n_arm,
+                                'Environment': env,
+                                'Metric': metric,
+                                'Value': f"{row[metric]:.2f}",
+                                'Reason': 'Outlier'
+                            })
 
             # NaN handling
             arm_nan_cols = arm_data.columns[arm_data.isna().any()].tolist()
@@ -100,13 +113,15 @@ def process_all_participants(results_dir='results'):
                     removal_report.append({
                         'Participant': 'All',
                         'Arm': n_arm,
+                        'Environment': 'All',
                         'Metric': col,
                         'Value': 'NaN present',
                         'Reason': 'Column nullified'
                     })
 
-        # Bulk removal by participant+N combination
-        final_df = final_df[~final_df[['Subject', 'N']].apply(tuple, axis=1).isin(outlier_participants)]
+        # Remove participants with any outliers in the arm
+        exclusion_mask = final_df[['Subject', 'N']].apply(tuple, axis=1).isin(outlier_participants)
+        final_df = final_df[~exclusion_mask]
 
         # Column cleanup
         common_nan_cols = nan_columns[2].intersection(nan_columns[3])
@@ -117,11 +132,12 @@ def process_all_participants(results_dir='results'):
                 removal_report.append({
                     'Participant': 'All',
                     'Arm': 'Both',
+                    'Environment': 'All',
                     'Metric': col,
                     'Value': 'NaN in both arms',
                     'Reason': 'Column removed'
                 })
-
+                
         tracking['excluded_both'] = set(tracking['excluded'][2]) & set(tracking['excluded'][3])
 
         # Generate reports
@@ -140,41 +156,40 @@ def process_all_participants(results_dir='results'):
             Path(results_dir)/'motion_artifacts.csv',
             pd.concat(motion_artifacts_data, ignore_index=True)
         )
-        
+
 def _delete_old_csvs(results_dir='results'):
-    """Delete old output CSV files before new processing."""
+    """Remove previous output files before processing"""
     output_files = [
         'final_dataset.csv',
         'motion_artifacts.csv',
-        'data_cleaning_report.md'  # Optional: you might want to keep this
+        'data_cleaning_report.md'
     ]
     for fname in output_files:
-        file_path = os.path.join(results_dir, fname)
-        if os.path.exists(file_path):
+        file_path = Path(results_dir) / fname
+        if file_path.exists():
             os.remove(file_path)
     
-    # Optionally, delete participant corrected files
+    # Remove participant-level corrected files
     for participant_dir in Path(results_dir).iterdir():
         if participant_dir.is_dir():
             for csv_file in participant_dir.glob('*_data_corrected.csv'):
                 os.remove(csv_file)
-        
+
 def _generate_cleaning_report(report_data, eligible, excluded, excluded_both, dv_excluded, output_dir):
-    """Generate structured markdown report with eligible-for-analysis count"""
+    """Generate markdown report with environment-level details"""
     report_path = Path(output_dir) / 'data_cleaning_report.md'
     
     with open(report_path, 'w') as f:
         f.write("# Data Cleaning Report\n\n")
-        f.write("## Summary\n\nAutomated data cleaning report showing participant exclusions and data modifications.\n\n")
+        f.write("## Summary\n\nAutomated data cleaning report with environment-specific outlier detection.\n\n")
         
         # Participant exclusions
         f.write("## Participant Exclusions\n\n")
         for arm in [2, 3]:
             f.write(f"### Arm {arm}\n\n")
-            f.write(f"- **Number of eligible participants:** {len(eligible[arm])}\n")
-            f.write(f"- **Number of excluded participants:** {len(excluded[arm])}\n")
-            # NEW: Add number eligible for analysis (after exclusions)
-            f.write(f"- **Number of participants eligible for analysis:** {len(eligible[arm]) - len(excluded[arm])}\n")
+            f.write(f"- **Eligible participants:** {len(eligible[arm])}\n")
+            f.write(f"- **Excluded participants:** {len(excluded[arm])}\n")
+            f.write(f"- **Participants in analysis:** {len(eligible[arm]) - len(excluded[arm])}\n")
             excl_list = sorted(list(excluded[arm]))
             f.write(f"- **Exclusion list:** {', '.join(map(str, excl_list))}\n\n")
         
@@ -191,40 +206,38 @@ def _generate_cleaning_report(report_data, eligible, excluded, excluded_both, dv
         
         # Detailed log
         f.write("## Detailed Modification Log\n\n")
-        f.write("| Participant |  Arm  | Metric            | Value             | Reason           |\n")
-        f.write("|-------------|-------|-------------------|-------------------|------------------|\n")
+        f.write("| Participant | Arm  | Environment | Metric            | Value             | Reason           |\n")
+        f.write("|-------------|------|-------------|-------------------|-------------------|------------------|\n")
         for entry in report_data:
             f.write(
-                f"| {str(entry['Participant']).center(11)} | "
-                f"{str(entry['Arm']).center(5)} | "
+                f"| {str(entry['Participant']).ljust(11)} | "
+                f"{str(entry['Arm']).ljust(4)} | "
+                f"{str(entry['Environment']).ljust(11)} | "
                 f"{entry['Metric'].ljust(17)} | "
-                f"{entry['Value'].rjust(17)} | "
+                f"{entry['Value'].ljust(17)} | "
                 f"{entry['Reason'].ljust(16)} |\n"
             )
 
 def _process_participant_file(file_path):
-    """Process individual participant file with baseline correction"""
+    """Process participant data with baseline correction"""
     df = pd.read_csv(file_path)
     df['Subject'] = df['Subject'].str.replace('P', '').astype(int)
-    
-    # Add N-arm type conversion
     df['N'] = df['N'].astype(int)
     
-    # Split baseline (N=0) and task data
+    # Split baseline and task data
     baseline_df = df[df['N'] == 0].copy()
     task_df = df[df['N'] != 0].copy()
     
     if baseline_df.empty:
         return pd.DataFrame(), pd.DataFrame()
-
-    # Calculate baseline-corrected metrics
+    
+    # Apply baseline correction
     for metric in ['FTCLI', 'FTPACLI', 'EngI']:
         task_df[f'{metric}_corrected'] = task_df.apply(
             lambda row: _calculate_corrected_value(row, baseline_df, metric),
             axis=1
         )
 
-    # Prepare output columns
     output_cols = [
         'Subject', 'Env', 'N', 'NasaCLI', 'FTCLI_corrected',
         'FTPACLI_corrected', 'EngI_corrected', 'F1', 'TotalPress',
@@ -237,7 +250,7 @@ def _process_participant_file(file_path):
     )
 
 def _calculate_corrected_value(row, baseline_df, column):
-    """Calculate baseline-normalized values with error handling"""
+    """Calculate baseline-normalized values"""
     try:
         env = row['Env']
         subject = row['Subject']
@@ -252,9 +265,8 @@ def _calculate_corrected_value(row, baseline_df, column):
         return np.nan
 
 def _overwrite_final_dataset(final_path, new_data):
-    """Overwrite the final dataset with new data"""
+    """Save final cleaned dataset"""
     new_data.to_csv(final_path, index=False)
-
 
 if __name__ == "__main__":
     process_all_participants()

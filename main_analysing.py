@@ -10,6 +10,7 @@ from scikit_posthocs import posthoc_conover
 from typing import List
 from pathlib import Path
 from sklearn.preprocessing import PowerTransformer
+import scipy.stats
 
 # Configure numerical stability
 np.seterr(divide='ignore', invalid='ignore')
@@ -26,11 +27,9 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def initialize_directories():
     """Create required output directories"""   
-    # Create directories
     for task in ['2back', '3back']:
         (RESULTS_DIR / task / 'parametric').mkdir(parents=True, exist_ok=True)
         (RESULTS_DIR / task / 'nonparametric').mkdir(parents=True, exist_ok=True)
-
 
 def load_dataset():
     """Load and validate input dataset from CSV"""
@@ -39,49 +38,99 @@ def load_dataset():
         print(f"Info: Dataset loaded from {DATA_PATH}")
         return df
     except FileNotFoundError:
-        print("Critical warning: issing input data file - aborting analysis")
+        print("Critical warning: Missing input data file - aborting analysis")
         sys.exit(1)
 
 def _check_rm_assumptions(data, dv):
-    """Check assumptions for parametric analysis"""
-    norm = pg.normality(data[dv])
+    """Check assumptions for parametric analysis with environment-specific normality"""
+    env_normality = {}
+    all_passed = True
+    
+    for env in data['Env'].unique():
+        env_data = data[data['Env'] == env][dv]
+        # Detect zero-range data (all values identical)
+        zero_range = (env_data.nunique() == 1)
+        norm = pg.normality(env_data)
+        env_passed = norm['pval'].values[0] >= 0.05
+        env_normality[env] = {
+            'pval': norm['pval'].values[0],
+            'passed': env_passed,
+            'zero_range': zero_range  # New flag
+        }
+        if not env_passed:
+            all_passed = False
+    
     sph = pg.sphericity(data, dv=dv, subject='Subject', within='Env')
     
     return {
-        'normality_passed': norm['pval'].values[0] >= 0.05,
-        'normality_pval': norm['pval'].values[0],
+        'env_normality': env_normality,
+        'all_envs_normal': all_passed,
         'sphericity_pval': sph[-1],
         'epsilon_gg': pg.epsilon(data, dv=dv, correction='gg'),
-        'valid': (norm['pval'].values[0] >= 0.05) and (sph[-1] >= 0.05)
+        'valid': all_passed and (sph[-1] >= 0.05)
     }
 
-def generate_report(assumptions, transforms, dv, task_level, save_dir, analysis_type='parametric', aov=None):
-    """Create type-specific analysis reports"""
+def generate_report(initial_assumptions, final_assumptions, transforms, dv, task_level, save_dir, analysis_type='parametric', aov=None, dv_descriptive=None):
+    """Create type-specific analysis reports with pre/post transformation comparison"""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     
+    # Determine transformation status for reporting
+    transformed = dv in transforms
+    transformation_status = "*Pre/Post Transformation Comparison*" if transformed else "*No Transformation Applied*"
+    
     report_content = f"""
 ## Analysis Report: {dv} ({task_level})
+{transformation_status}
+
 ### Data Transformations
 Applied method: *{transforms.get(dv, 'none')}*
 *Interpretation:* Transformations adjust data distribution to meet parametric assumptions. Yeo-Johnson preserves sign while handling zero/negative values.
 
-### Assumption Checks
-1. *DV Normality (Shapiro-Wilk)*
-   - p-value: {assumptions['normality_pval']:.4f}
-   - Passed: {'Yes' if assumptions['normality_passed'] else 'No'}
-*Interpretation:* Tests if data follows normal distribution (null hypothesis assumes normal distribution). p > 0.05 does not reject null hypothesis."""
+### Pre-Transformation Assumptions
+1. *DV Normality (Shapiro-Wilk) by Environment*
+   | Environment | p-value  | Passed (p≥0.05)  | Note          |
+   |-------------|----------|------------------|---------------|"""
+    
+    for env, results in initial_assumptions['env_normality'].items():
+        note = "Zero range" if results['zero_range'] else ""
+        report_content += f"\n   | {env:<11} | {results['pval']:>8.4f} | {'Yes' if results['passed'] else 'No':>16} | {note:<13} |"
+    
+    report_content += f"""
+*Overall normality:* {'All environments passed' if initial_assumptions['all_envs_normal'] else 'At least one environment failed normality'}"""
 
-    if analysis_type == 'parametric':
-        correction = 'GG' if assumptions['epsilon_gg'] < 1 else 'None'
+    # post-transformation section if applied
+    if transformed:
+        report_content += """
+        
+### Post-Transformation Assumptions
+1. *DV Normality (Shapiro-Wilk) by Environment*
+   | Environment | p-value  | Passed (p≥0.05)  | Note          |
+   |-------------|----------|------------------|---------------|"""
+        
+        for env, results in final_assumptions['env_normality'].items():
+            note = "Zero range" if results['zero_range'] else ""
+            report_content += f"\n   | {env:<11} | {results['pval']:>8.4f} | {'Yes' if results['passed'] else 'No':>16} | {note:<13} |"
         
         report_content += f"""
+*Overall normality:* {'All environments passed' if final_assumptions['all_envs_normal'] else 'At least one environment failed normality'}"""
+    
+    # explanatory note for zero-range cases
+    report_content += """
+\n**Note:** Environments marked as 'Zero range' have all values identical. 
+Normality tests (Shapiro-Wilk) are unreliable in these cases."""
+
+    if analysis_type == 'parametric':
+        correction = 'GG' if final_assumptions['epsilon_gg'] < 1 else 'None'
+        
+        report_content += f"""
+        
 2. *Sphericity Handling*
-   - Mauchly's p-value: {assumptions['sphericity_pval']:.4f}
-   - Greenhouse-Geisser epsilon: {assumptions['epsilon_gg']:.3f}
+   - Mauchly's p-value: {final_assumptions['sphericity_pval']:.4f}
+   - Greenhouse-Geisser epsilon: {final_assumptions['epsilon_gg']:.3f}
    - Correction Applied: {correction}
 *Interpretation:* Sphericity requires equal variance differences between conditions. epsilon < 1 indicates violation, requiring correction."""
-
+        
         if aov is not None:
             if 'F' in aov.columns and 'ddof1' in aov.columns and 'ddof2' in aov.columns:
                 f_val = aov['F'].values[0]
@@ -91,49 +140,40 @@ Applied method: *{transforms.get(dv, 'none')}*
                 report_content += f"""
 3. *Effect Size*
    - *Partial eta-squared:* {eta_sq:.3f}
-*Interpretation:* Proportion of variance explained by factor."""
-
-    eligibility_status = "Eligible for parametric analysis." if assumptions['valid'] else "Ineligible for parametric analysis."
+*Interpretation:* Proportion of variance explained by factor."""    
     
+    if dv_descriptive:
+        report_content += "\n\n### Descriptive Statistics (Original Scale)"
+        report_content += "\n| Environment |   Mean   |      95% CI      |"
+        report_content += "\n|-------------|----------|------------------|"
+        for env, stats in dv_descriptive.items():
+            ci_str = f"[{stats['ci_low']:.2f}, {stats['ci_high']:.2f}]"
+            report_content += f"\n| {env:<11} | {stats['mean']:<8.2f} | {ci_str:<16} |"
+            
+    eligibility_status = "Eligible for parametric analysis." if final_assumptions['valid'] else "Ineligible for parametric analysis."        
     report_content += f"""\n
 *Eligibility Status:* {eligibility_status}
 *Analysis Type:* {analysis_type.title()}{' and nonparametric' if analysis_type == 'parametric' else ''}
-*Note:* Parametric eligibility requires passed normality (p ≥ 0.05) and sphericity (p ≥ 0.05 or corrected)."""
+*Note:* Parametric eligibility requires passed normality (p ≥ 0.05) in all environments and sphericity (p ≥ 0.05 or corrected)."""
 
     report_path = save_dir / f"{dv}_report.md"
     report_path.write_text(report_content.strip(), encoding="utf-8")
-    
+
 def _generate_final_report(task_level: str, 
                            nonparametric_path: Path,
                            parametric_path: Path,
-                           env_labels: List[str]) -> None:
-    """Generates comprehensive final analysis report with both parametric and non-parametric results.
-    
-    Workflow:
-    1. Load analysis results from CSV files
-    2. Identify significant/approaching results for both methods
-    3. Create method comparison table
-    4. Assemble report content with structured sections
-    5. Add post-hoc comparisons for both analysis types
-    6. Save final markdown report
-    """
-    
-    # Load analysis results from stored CSVs
+                           env_labels: List[str],
+                           descriptive_stats: dict) -> None:
+    """Generates comprehensive final analysis report with both parametric and non-parametric results."""
     df_nonpara = pd.read_csv(nonparametric_path)
     df_para = pd.read_csv(parametric_path)
     
-    # Section 1: Significant Findings Identification
-
-    # Filter results using standard significance thresholds
     sig_nonpara = df_nonpara[df_nonpara['p-unc'] < 0.05]
     approach_nonpara = df_nonpara[(df_nonpara['p-unc'] >= 0.05) & (df_nonpara['p-unc'] < 0.1)]
     
     sig_para = df_para[df_para['p-unc'] < 0.05]
     approach_para = df_para[(df_para['p-unc'] >= 0.05) & (df_para['p-unc'] < 0.1)]
 
-    # Section 2: Method Agreement Analysis
-
-    # Compare only variables appearing in significant/approaching results
     relevant_dvs = set(sig_nonpara['DV']).union(
         approach_nonpara['DV'],
         sig_para['DV'],
@@ -156,8 +196,6 @@ def _generate_final_report(task_level: str,
         }
         comparison.append(comp_entry)
 
-    # Section 3: Report Content Assembly
-
     md_content = f"""## Final Analysis Report ({task_level})
 
 ### Environment Definitions
@@ -171,11 +209,8 @@ def _generate_final_report(task_level: str,
 |      Variable      |  p-value  |  W Stat  |  Q Stat  |
 |--------------------|-----------|----------|----------|"""
 
-    # Populate nonparametric results table
     for _, row in sig_nonpara.iterrows():
         md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>9.4f} | {row['W']:>8.4f} | {row['Q']:>8.4f} |"
-
-    # Section 4: Approaching Significance
 
     md_content += "\n\n### 2. Nonparametric Approaching Significance"
     if not approach_nonpara.empty:
@@ -186,14 +221,12 @@ def _generate_final_report(task_level: str,
     else:
         md_content += "\n*No variables approaching significance*"
 
-    # Section 5: Parametric Results
-
     md_content += "\n\n### 3. Significant Parametric Results (RM ANOVA)"
     md_content += "\n|      Variable      |  p-value  |  F Value  | η²(Generalized) |"
     md_content += "\n|--------------------|-----------|-----------|-----------------|"
     for _, row in sig_para.iterrows():
         md_content += f"\n| {row['DV']:<18} | {row['p-unc']:>9.4f} | {row['F']:>9.4f} | {row['ng2']:>15.4f} |"
-
+    
     md_content += "\n\n### 4. Parametric Approaching Significance"
     if not approach_para.empty:
         md_content += "\n|      Variable      |  p-value  |  F Value  | η²(Generalized) |"
@@ -203,18 +236,12 @@ def _generate_final_report(task_level: str,
     else:
         md_content += "\n*No variables approaching significance*"
 
-    # Section 6: Method Comparison
-
     md_content += """\n\n### 5. Method Agreement Analysis
 |      Variable       | Nonparametric p | Parametric p |   Agreement   |
 |---------------------|-----------------|--------------|---------------|"""
     for row in sorted(comparison, key=lambda x: x['DV']):
         md_content += f"\n| {row['DV']:<19} | {row['Nonparametric_p']:>15.4f} | {row['Parametric_p']:>12.4f} | {row['Agreement']:>13} |"
 
-
-    # Section 7: Post-Hoc Comparisons
-
-    # Nonparametric Conover post-hocs
     posthoc_path = nonparametric_path.parent / 'posthoc_conover.csv'
     if posthoc_path.exists():
         posthoc_df = pd.read_csv(posthoc_path)
@@ -228,27 +255,23 @@ def _generate_final_report(task_level: str,
             md_content += f"\n#### {dv}"
             dv_df = posthoc_df[posthoc_df['DV'] == dv].copy()
             
-            # Calculate environment means from analysis data
-            analysis_data = pd.read_csv(nonparametric_path.parent.parent / f"{task_level}_data.csv")
-            means = analysis_data.groupby('Env')[dv].mean().round(2)
+            dv_stats = descriptive_stats.get(dv, {})
             
             dv_df['Means'] = dv_df.apply(
-                lambda row: f"{means[row['Env1']]} vs {means[row['Env2']]}", 
+                lambda row: f"{dv_stats.get(row['Env1'], {}).get('mean', 'NA'):.2f} vs {dv_stats.get(row['Env2'], {}).get('mean', 'NA'):.2f}", 
                 axis=1
             )
             
             md_content += """
-| Comparison of means |  Environments  |  p-value  | Significance |
-|---------------------|----------------|-----------|--------------|"""
+|  Environments  | Comparison of means |  p-value  | Significance |
+|----------------|---------------------|-----------|--------------|"""
             for _, row in dv_df.iterrows():
-                md_content += f"\n| {row['Means']:<19} | {row['Env1']:7}-{row['Env2']:6} | {row['p_value']:>9.4f} | {row['Significance']:>12} |"
+                md_content += f"\n| {row['Env1']:7}-{row['Env2']:6} | {row['Means']:<19} | {row['p_value']:>9.4f} | {row['Significance']:>12} |"
 
-    # Parametric post-hoc comparisons
     para_posthoc_path = parametric_path.parent / 'posthoc_parametric.csv'
     if para_posthoc_path.exists():
         try:
             para_ph = pd.read_csv(para_posthoc_path)
-            # Check for required columns and non-empty data
             required_cols = ['Env1', 'Env2', 'p-corr', 'cohen-d', 'DV', 'Significance']
             if not para_ph.empty and all(col in para_ph.columns for col in required_cols):
                 md_content += "\n\n### 7. Parametric Post-Hoc Comparisons (Bonferroni-corrected)"
@@ -256,11 +279,17 @@ def _generate_final_report(task_level: str,
                     md_content += f"\n#### {dv}"
                     dv_df = para_ph[para_ph['DV'] == dv].copy()
                     
+                    dv_stats = descriptive_stats.get(dv, {})
+                    dv_df['Means'] = dv_df.apply(
+                        lambda row: f"{dv_stats.get(row['Env1'], {}).get('mean', 'NA'):.2f} vs {dv_stats.get(row['Env2'], {}).get('mean', 'NA'):.2f}", 
+                        axis=1
+                    )
+                    
                     md_content += """
-|  Environments  |   p-value | Cohen's d | Significance |
-|----------------|-----------|-----------|--------------|"""
+|  Environments  | Comparison of means |   p-value | Cohen's d | Significance |
+|----------------|---------------------|-----------|-----------|--------------|"""
                     for _, row in dv_df.iterrows():
-                        md_content += f"\n| {row['Env1']:7}-{row['Env2']:6} | {row['p-corr']:>9.4f} | {row['cohen-d']:>9.4f} | {row['Significance']:>12} |"
+                        md_content += f"\n| {row['Env1']:7}-{row['Env2']:6} | {row['Means']:<19} | {row['p-corr']:>9.4f} | {row['cohen-d']:>9.4f} | {row['Significance']:>12} |"
             else:
                 print(f"Warning: Skipping empty/malformed parametric post-hoc: {para_posthoc_path}")
                 
@@ -282,46 +311,35 @@ def _generate_final_report(task_level: str,
   - Significance: **: p<0.05 d; ns: p≥0.05 
 - *Method Agreement:* Compares parametric and nonparametric p-value consistency"""
 
-    # Final Output
     report_path = nonparametric_path.parent.parent / 'analyses_results.md'
     report_path.write_text(md_content, encoding='utf-8')
     print(f"Info: Generated final report at {report_path}")
 
-
-    
 def _friedman_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
+    """Perform non-parametric post-hoc pairwise Conover tests with Bonferroni correction"""
     results = []
     for dv in dvs:
-        # Get unique environments
         envs = sorted(data['Env'].unique())
-        
-        # Generate comparison matrix
         ph = posthoc_conover(
             data, 
             val_col=dv, 
             group_col='Env', 
             p_adjust='bonf'
         )
-        
-        # Convert to long format and filter valid pairs
         ph_long = ph.stack().reset_index()
         ph_long.columns = ['Env1', 'Env2', 'p_value']
-        ph_long = ph_long[ph_long['Env1'] != ph_long['Env2']]  # Remove self-comparisons
-        
-        # Remove duplicate pairs (A vs B == B vs A)
+        ph_long = ph_long[ph_long['Env1'] != ph_long['Env2']]
         ph_long = ph_long[ph_long['Env1'] < ph_long['Env2']]
-        
         ph_long['DV'] = dv
         ph_long['Task'] = task_level
         ph_long['Significance'] = ph_long['p_value'].apply(
             lambda x: '**' if x < 0.05 else 'ns'
         )
         results.append(ph_long)
-    
     return pd.concat(results) if results else pd.DataFrame()
 
 def _parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> pd.DataFrame:
-    """Perform parametric post-hoc tests with Bonferroni correction"""
+    """Perform parametric post-hoc pairwise t-tests with Bonferroni correction"""
     results = []
     for dv in dvs:
         try:
@@ -335,13 +353,11 @@ def _parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> 
                 alpha=0.05,
                 padjust='bonf'
             )
-            # Rename columns to match expected format
             ph = ph.rename(columns={
                 'A': 'Env1',
                 'B': 'Env2',
                 'hedges': 'cohen-d'
             })
-            # Add significance markers
             ph['Significance'] = ph['p-corr'].apply(
                 lambda x: '**' if x < 0.05 else 'ns'
             )
@@ -353,13 +369,16 @@ def _parametric_posthoc(data: pd.DataFrame, task_level: str, dvs: List[str]) -> 
     return pd.concat(results) if results else pd.DataFrame()
 
 def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str]) -> List[str]:
-    """Core analysis workflow with automated reporting"""
+    """Core analysis workflow with automated reporting and descriptive statistics"""
     parametric_dir = RESULTS_DIR / task_level / 'parametric'
     nonparametric_dir = RESULTS_DIR / task_level / 'nonparametric'
     
     parametric_results = []
     nonparametric_results = []
     transformations = {}
+    transformers = {}  # Store transformer objects for back-transformation
+    descriptive_stats = {}  # Store descriptive statistics for reporting
+    assumption_history = {}  # Track assumption states before/after transformations
     
     # Get actual environment labels from data
     env_labels = sorted(data['Env'].unique())
@@ -376,23 +395,71 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
     nonparametric_only = []
 
     for dv in variables:
-        assumptions = _check_rm_assumptions(data, dv)
+        # Store original data for back-transformation
+        original_dv = data[dv].copy()
         
-        # Apply transformation if needed
-        if not assumptions['valid'] and not assumptions['normality_passed']:
+        # Capture pre-transformation assumption state
+        pre_assumptions = _check_rm_assumptions(data, dv)
+        assumption_history[dv] = {'pre': pre_assumptions}
+        
+        # Apply transformation if needed based on pre-assumptions
+        if not pre_assumptions['valid'] and not pre_assumptions['all_envs_normal']:
             pt = PowerTransformer(method='yeo-johnson')
-            data[dv] = pt.fit_transform(data[[dv]])
+            data[[dv]] = pt.fit_transform(data[[dv]])
             transformations[dv] = 'yeo-johnson'
-            assumptions = _check_rm_assumptions(data, dv)
+            transformers[dv] = pt
+            # Capture post-transformation assumption state
+            post_assumptions = _check_rm_assumptions(data, dv)
+            assumption_history[dv]['post'] = post_assumptions
+        else:
+            post_assumptions = pre_assumptions
 
-        # Track analysis eligibility
-        if assumptions['valid']:
+        # Track analysis eligibility using final assumption state
+        if post_assumptions['valid']:
             parametric_candidates.append(dv)
         else:
             nonparametric_only.append(dv)
 
+        # Compute descriptive statistics (on original scale)
+        dv_descriptive = {}
+        for env in env_labels:
+            if dv in transformers:
+                # Back-transform stats for reporting
+                trans_df = data.loc[data['Env'] == env, [dv]]
+                mean_trans = np.mean(trans_df[dv])
+                sem_trans = scipy.stats.sem(trans_df[dv])
+                n = len(trans_df)
+                if n > 1:
+                    ci_low_trans, ci_high_trans = scipy.stats.t.interval(0.95, n-1, loc=mean_trans, scale=sem_trans)
+                else:
+                    ci_low_trans, ci_high_trans = mean_trans, mean_trans
+                
+                transformer = transformers[dv]
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=UserWarning)
+                    mean_orig = transformer.inverse_transform(pd.DataFrame({dv: [mean_trans]}))[0][0]
+                    ci_low_orig = transformer.inverse_transform(pd.DataFrame({dv: [ci_low_trans]}))[0][0]
+                    ci_high_orig = transformer.inverse_transform(pd.DataFrame({dv: [ci_high_trans]}))[0][0]
+            else:
+                env_data = data[data['Env'] == env][dv].dropna().values
+                mean_orig = np.mean(env_data)
+                sem_orig = scipy.stats.sem(env_data)
+                n = len(env_data)
+                if n > 1:
+                    ci_low_orig, ci_high_orig = scipy.stats.t.interval(0.95, n-1, loc=mean_orig, scale=sem_orig)
+                else:
+                    ci_low_orig, ci_high_orig = mean_orig, mean_orig
+            
+            dv_descriptive[env] = {
+                'mean': mean_orig,
+                'ci_low': ci_low_orig,
+                'ci_high': ci_high_orig
+            }
+        
+        descriptive_stats[dv] = dv_descriptive
+
         # Parametric analysis path
-        if assumptions['valid']:
+        if post_assumptions['valid']:
             try:
                 aov = pg.rm_anova(
                     data=data,
@@ -402,7 +469,6 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
                     correction='auto'
                 ).assign(DV=dv)
                 
-                # Reorder parametric columns
                 parametric_cols = ['DV'] + \
                                 [c for c in aov.columns if c.startswith('p-')] + \
                                 [c for c in aov.columns if c not in ['DV'] and not c.startswith('p-')]
@@ -410,17 +476,19 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
                 
                 parametric_results.append(aov)
                 generate_report(
-                    assumptions=assumptions,
+                    initial_assumptions=assumption_history[dv]['pre'],
+                    final_assumptions=post_assumptions,
                     transforms=transformations,
                     dv=dv,
                     task_level=task_level,
                     save_dir=parametric_dir,
                     analysis_type='parametric',
-                    aov=aov
+                    aov=aov,
+                    dv_descriptive=dv_descriptive
                 )
             except Exception as e:
                 print(f"Error: Parametric analysis failed for {dv}: {str(e)}")
-
+        
         # Non-parametric analysis path runs always
         try:
             friedman = pg.friedman(
@@ -430,7 +498,6 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
                 subject='Subject'
             ).assign(DV=dv)
             
-            # Reorder non-parametric columns
             nonparametric_cols = ['DV'] + \
                                [c for c in friedman.columns if c.startswith('p-')] + \
                                [c for c in friedman.columns if c not in ['DV'] and not c.startswith('p-')]
@@ -438,18 +505,20 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
             
             nonparametric_results.append(friedman)
             
-            if not assumptions['valid']:
+            if not post_assumptions['valid']:
                 generate_report(
-                    assumptions=assumptions,
+                    initial_assumptions=assumption_history[dv]['pre'],
+                    final_assumptions=post_assumptions,
                     transforms=transformations,
                     dv=dv,
                     task_level=task_level,
                     save_dir=nonparametric_dir,
-                    analysis_type='nonparametric'
+                    analysis_type='nonparametric',
+                    dv_descriptive=dv_descriptive
                 )
         except Exception as e:
             print(f"Error: Non-parametric analysis failed for {dv}: {str(e)}")
-
+    
     # Save results with proper column order
     if parametric_results:
         pd.concat(parametric_results).to_csv(parametric_dir/'analysis_parametric.csv', index=False)
@@ -457,29 +526,28 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
     if nonparametric_results:
         pd.concat(nonparametric_results).to_csv(nonparametric_dir/'analysis_nonparametric.csv', index=False)
     
-    # Add print statements
+    # Print analysis eligibility
     if parametric_candidates:
         print(f"Info: {task_level} variables eligible for both analyses: {', '.join(parametric_candidates)}")
     
     if nonparametric_only:
         print(f"Info: {task_level} variables requiring non-parametric analysis: {', '.join(nonparametric_only)}")
 
-    # Always perform nonparametric post-hoc analysis
+    # Perform nonparametric post-hoc analysis
     sig_dvs = [row['DV'] for _, row in pd.read_csv(nonpara_path).iterrows() 
-              if row['p-unc'] < 0.05]
+              if row['p-unc'] < 0.05] if nonpara_path.exists() else []
     if sig_dvs:
         posthoc_df = _friedman_posthoc(data, task_level, sig_dvs)
         posthoc_path = nonparametric_dir / 'posthoc_conover.csv'
         posthoc_df.to_csv(posthoc_path, index=False)
         print(f"Info: Saved post-hoc results to {posthoc_path}")
     
-    # Save parametric results
+    # Save parametric results and post-hoc
     if parametric_results:
         para_df = pd.concat(parametric_results)
         para_path = parametric_dir / 'analysis_parametric.csv'
         para_df.to_csv(para_path, index=False)
         
-        # Perform parametric post-hoc
         sig_para = para_df[para_df['p-unc'] < 0.05]['DV'].tolist()
         if sig_para:
             para_posthoc = _parametric_posthoc(data, task_level, sig_para)
@@ -487,10 +555,16 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
             para_posthoc.to_csv(para_posthoc_path, index=False)
             print(f"Info: Saved parametric post-hoc results to {para_posthoc_path}")
     
-    # Generate comparative report
-    _generate_final_report(task_level=task_level, nonparametric_path=nonpara_path, parametric_path=para_path, env_labels=env_labels)
+    # Generate comparative report with descriptive stats
+    _generate_final_report(
+        task_level=task_level, 
+        nonparametric_path=nonpara_path, 
+        parametric_path=para_path, 
+        env_labels=env_labels,
+        descriptive_stats=descriptive_stats
+    )
     
-    # Save task-specific data for reporting
+    # Save task-specific data
     task_dir = RESULTS_DIR / task_level
     data.to_csv(task_dir / f"{task_level}_data.csv", index=False)
     
@@ -502,23 +576,18 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
 def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
     """Generate and save correlation matrix for task-specific DVs"""
     try:
-        # Select only numeric DV columns
         numeric_cols = task_data.select_dtypes(include=np.number).columns.tolist()
         dvs = [col for col in numeric_cols if col not in ['Subject', 'Env', 'N']]
         
         if not dvs:
             print(f"Warning: No valid DVs for correlation matrix in {task_dir.name}")
             return
-
-        # Calculate correlations
-        corr_matrix = task_data[dvs].corr(method='pearson')
         
-        # Save correlation matrix
+        corr_matrix = task_data[dvs].corr(method='pearson')
         matrix_path = task_dir / 'correlation_matrix.csv'
         corr_matrix.to_csv(matrix_path)
         print(f"Info: Saved correlation matrix to {matrix_path}")
-
-        # Create visualization
+        
         plt.figure(figsize=(12, 10))
         sns.heatmap(
             corr_matrix,
@@ -534,7 +603,6 @@ def _generate_correlation_matrix(task_data: pd.DataFrame, task_dir: Path):
         plt.xticks(rotation=45, ha='right')
         plt.yticks(rotation=0)
         
-        # Save plot
         plot_path = task_dir / 'correlation_matrix.png'
         plt.savefig(plot_path, bbox_inches='tight', dpi=300)
         plt.close()
@@ -562,7 +630,6 @@ def generate_combined_visualizations(combined_data, dvs):
             palette='colorblind'
         )
 
-        # Move legend to lower right corner
         plt.legend(
             loc='lower right',
             bbox_to_anchor=(1.0, 0.0),
@@ -581,16 +648,12 @@ def generate_combined_visualizations(combined_data, dvs):
         plt.close()
         
 def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
-    """    Generates a markdown report with basic statistics on motion artifacts,
-    stratified by baseline (N=0) and experiment (N=2,3)."""
-    # Load data
+    """Generates a markdown report with basic statistics on motion artifacts"""
     df = pd.read_csv(data_path)
     print(f"Info: Loaded motion artifact data from {data_path}")
     
-    # Define report sections
     report = []
     
-    # All data
     overall_stats = df['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
     report.append("## Motion Artifact Statistics (All Conditions)")
     report.append("| Statistic |  Value  |")
@@ -599,7 +662,6 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
         report.append(f"| {idx:9} | {val:7} |")
     print("Info: computed overall motion artifact statistics")
     
-    # Baseline (N=0)
     baseline = df[df['N'] == 0.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
     report.append("\n## Baseline (N=0)")
     report.append("| Statistic |  Value  |")
@@ -608,7 +670,6 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
         report.append(f"| {idx:9} | {val:7} |")
     print("Info: computed baseline (N=0) motion artifact statistics")
     
-    # Experimental (N=2)
     n2_stats = df[df['N'] == 2.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
     report.append("\n## Experimental (N=2)")
     report.append("| Statistic |  Value  |")
@@ -617,7 +678,6 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
         report.append(f"| {idx:9} | {val:7} |")
     print("Info: computed N=2 motion artifact statistics")
 
-    # Experimental (N=3)
     n3_stats = df[df['N'] == 3.0]['MotionArt'].describe(percentiles=[.25, .5, .75]).round(4)
     report.append("\n## Experimental (N=3)")
     report.append("| Statistic |  Value  |")
@@ -626,7 +686,6 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
         report.append(f"| {idx:9} | {val:7} |")
     print("Info: computed N=3 motion artifact statistics")
     
-    # Save report in statistical_analysis folder
     report_path = results_dir / 'motion_artifact_report.md'
     results_dir.mkdir(parents=True, exist_ok=True)
     with open(report_path, 'w', encoding='utf-8') as f:
@@ -634,21 +693,11 @@ def generate_motion_artifact_report(data_path: Path, results_dir: Path) -> None:
     print(f"Info: Saved motion artifact report to {report_path}")
 
 def main():
-    """Orchestrates statistical analysis workflow for N-back task data.
-    Workflow steps:
-    1. Deletes the statistical_analysis folder if it exists
-    2. Initializes directory structure
-    3. Loads and filters experimental data
-    4. Performs parametric/non-parametric analyses
-    5. Generates reports and visualizations
-    """
+    """Orchestrates statistical analysis workflow for N-back task data"""
     try:
-        # Delete existing folder first
         stats_dir = Path("results/statistical_analysis")
         if stats_dir.exists():
             shutil.rmtree(stats_dir)
-            
-        # Create new directory structure
         stats_dir.mkdir(parents=True, exist_ok=True)
 
         initialize_directories()
@@ -686,7 +735,6 @@ def main():
                     task_data = [d for d in all_viz_data if d['Task'].iloc[0] == task_level][0]
                     generate_combined_visualizations(task_data, vars)
 
-        # Add motion artifact report
         generate_motion_artifact_report(Path("results/motion_artifacts.csv"), stats_dir)
         
     except Exception as e:
