@@ -605,6 +605,11 @@ def generate_combined_visualizations(combined_data, dvs):
     combined_dir.mkdir(parents=True, exist_ok=True)
 
     for dv in dvs:
+        # Calculate sample size and t-multiplier for this DV
+        sample_sizes = combined_data.groupby(['Task', 'Env'])[dv].count()
+        avg_n = int(sample_sizes.mean())  # Use average sample size
+        t_multiplier = scipy.stats.t.ppf(0.975, avg_n - 1)  # 95% CI t-value
+        
         plt.figure(figsize=(10, 6), dpi=300)
         ax = sns.lineplot(
             data=combined_data,
@@ -614,7 +619,7 @@ def generate_combined_visualizations(combined_data, dvs):
             style='Task',
             markers=['o', 's'],
             dashes=False,
-            errorbar=('ci', 95),
+            errorbar=('se', t_multiplier),
             palette='colorblind'
         )
 
