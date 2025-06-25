@@ -423,33 +423,21 @@ def analyze_task_data(data: pd.DataFrame, task_level: str, variables: List[str])
         # Compute descriptive statistics (on original scale)
         dv_descriptive = {}
         for env in env_labels:
+            # Use original data for descriptive statistics
             if dv in transformers:
-                # Back-transform stats for reporting
-                trans_df = data.loc[data['Env'] == env, [dv]]
-                mean_trans = np.mean(trans_df[dv])
-                sem_trans = scipy.stats.sem(trans_df[dv])
-                n = len(trans_df)
-                if n > 1:
-                    ci_low_trans, ci_high_trans = scipy.stats.t.interval(0.95, n-1, loc=mean_trans, scale=sem_trans)
-                else:
-                    ci_low_trans, ci_high_trans = mean_trans, mean_trans
-                
-                transformer = transformers[dv]
-                with warnings.catch_warnings():
-                    warnings.filterwarnings("ignore", category=UserWarning)
-                    mean_orig = transformer.inverse_transform(pd.DataFrame({dv: [mean_trans]}))[0][0]
-                    ci_low_orig = transformer.inverse_transform(pd.DataFrame({dv: [ci_low_trans]}))[0][0]
-                    ci_high_orig = transformer.inverse_transform(pd.DataFrame({dv: [ci_high_trans]}))[0][0]
+                # Use the stored original data
+                env_data = original_dv[data['Env'] == env].dropna().values
             else:
                 env_data = data[data['Env'] == env][dv].dropna().values
-                mean_orig = np.mean(env_data)
-                sem_orig = scipy.stats.sem(env_data)
-                n = len(env_data)
-                if n > 1:
-                    ci_low_orig, ci_high_orig = scipy.stats.t.interval(0.95, n-1, loc=mean_orig, scale=sem_orig)
-                else:
-                    ci_low_orig, ci_high_orig = mean_orig, mean_orig
-            
+
+            mean_orig = np.mean(env_data)
+            sem_orig = scipy.stats.sem(env_data)
+            n = len(env_data)
+            if n > 1:
+                ci_low_orig, ci_high_orig = scipy.stats.t.interval(0.95, n-1, loc=mean_orig, scale=sem_orig)
+            else:
+                ci_low_orig, ci_high_orig = mean_orig, mean_orig
+
             dv_descriptive[env] = {
                 'mean': mean_orig,
                 'ci_low': ci_low_orig,
