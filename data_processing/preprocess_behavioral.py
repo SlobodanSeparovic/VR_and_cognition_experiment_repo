@@ -117,7 +117,6 @@ def process_in_game_df(clean_df, meta):
     avg_rt_incorrect = rt_series[clean_df['AnswerCorrect'] == 0].mean()
     
     # Create and return dataframe with single row
-    # Create dataframe and fill NaN
     result_df = pd.DataFrame([{
         'N': clean_df['N'].iloc[0],
         'V': clean_df['V'].iloc[0],
