@@ -18,9 +18,9 @@ VR_and_cognition_experiment/
 │   ├── random_seqs.csv
 │   ├── randomization.py
 ├── .gitignore
-├── main_analyse.py
-├── main_correct.py
-├── main_preprocess.py
+├── main_analysing.py
+├── main_correcting.py
+├── main_preprocessing.py
 ├── README.md
 ├── requirements.txt
 └── settings.ini
@@ -37,12 +37,12 @@ File Management: It creates paths for new files and overwrites existing files if
 Data Structure: Participant data must be stored in the experiment folder following a BIDS-compliant naming convention (see the brAIn lab data repository for details).
 
 # Experimental Setup Using Unity
-The experimental environments and setup are available in the GitHub repository:
-https://github.com/carolinarve/setup_repo
+The experimental environments and setup are available in the brAInlab GitHub repository:
+https://github.itu.dk/brAInLab/vr-and-cognition-experiment.git
 
 # Data Collected During the Experiments
 The full database of experimental data is stored in the brAIn lab GitHub repository:
-https://github.itu.dk/brAInLab/vr-experiment-data.git
+https://github.itu.dk/brAInLab/vr-and-cognition-data.git
 
 # Auxiliary Scripts and Data
 Folder: experiment_scripts
@@ -119,11 +119,11 @@ Two Analysis Arms:
 
 Assumption Testing:
 
-    For each dependent variable, the pipeline tests the assumptions of repeated measures ANOVA (normality and sphericity).
+    For each dependent variable within environment, the pipeline tests the assumption of normality for repeated measures ANOVA.
+    Normality:  Assessed using the Shapiro-Wilk test; variables passing (p ≥ 0.05) proceed.
+                If not passed, Yeo_Johnson data transformation is applied, and data gets retested for normallity.
 
-    Normality: Assessed using the Shapiro-Wilk test; variables passing (p ≥ 0.05) proceed.
-
-    Sphericity: Assessed using Mauchly’s test; if violated (p < 0.05), Greenhouse-Geisser corrections are applied.
+    Sphericity assumption correction: Assessed using Mauchly’s test; if violated (p < 0.05), Greenhouse-Geisser corrections are applied.
 
 Analysis Paths:
 
@@ -135,7 +135,7 @@ Analysis Paths:
 
     Parametric:
 
-        If the dependen variable met the assumtions, repeated measures ANOVA is performed.
+        If the dependent variable met the assumptions, repeated measures ANOVA is performed.
 
         Effect sizes (globalized eta-squared) are reported.
 
@@ -157,13 +157,11 @@ Reporting:
 
 Motion Artifacts:
 
-    A dedicated report (motion_artifact_report.md) summarizes basic statistics on motion artifacts, stratified by baseline (N=0) and
-    
-    experimental (N=2,N=3) conditions.
+    A dedicated report (motion_artifact_report.md) summarizes basic statistics on motion artifacts, total and stratified by baseline (N=0) and experimental (N=2,N=3) conditions.
 
 Visualizations:
 
-    Correlation matrices and combined performance plots are generated for each task and across tasks for common variables.
+    Correlation matrices and combined performance plots are generated for each dependent variable. 
 
 # Further Notes
 Logginng: All steps are logged for transparency and reproducibility.
